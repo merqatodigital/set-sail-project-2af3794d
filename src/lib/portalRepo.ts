@@ -63,7 +63,6 @@ export interface PortalBookingRequestRow {
   id: string;
   reference: string;
   guest_name: string;
-  guest_email: string;
   guest_phone: string;
   room_type: string;
   check_in: string;

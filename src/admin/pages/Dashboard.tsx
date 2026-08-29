@@ -167,7 +167,7 @@ export default function Dashboard() {
   // TALA reads). Resolves to [] until David runs the schema migration.
   const pendingPortalTours = portal.tours.filter((t) => t.status === "requested").length;
   const pendingPortalRentals = portal.rentals.filter((r) => r.status === "requested").length;
-  const pendingPortalBookings = portal.bookings.filter((b) => b.status === "pending").length;
+  const pendingPortalBookings = portal.bookings.filter((b) => b.status === "requested").length;
   const unreadPortalMessages = portal.messages.filter((m) => m.status === "unread").length;
 
   // Booking-derived attention (real resort state, not hard-coded names).

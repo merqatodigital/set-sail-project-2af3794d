@@ -8,17 +8,13 @@ import {
   Trash2,
   CircleDollarSign,
   MessageCircle,
-  CheckCircle,
-  XCircle,
 } from "lucide-react";
 import { useToast } from "@/context/ToastContext";
 import { useCms } from "@/context/CmsContext";
 import { Button, Card, Field, Input, Textarea, Select, Modal } from "@/components/ui";
-import { PageHeader, EmptyState, TabBar } from "../shared/PageHeader";
+import { PageHeader, EmptyState } from "../shared/PageHeader";
 import { OpsTable, OpsTH, OpsTD, StatusPill, KpiCard } from "../ops/OpsPrimitives";
 import { useOperations } from "../ops/useOperations";
-import { usePortalOps } from "../ops/usePortalOps";
-import { updatePortalBookingStatus } from "@/lib/portalAdminRepo";
 import { upsertBooking, deleteBooking, upsertPayment } from "@/lib/opsRepo";
 import { sendWhatsAppTemplate } from "@/lib/whatsappSend";
 import {
@@ -53,10 +49,8 @@ const emptyBooking = (): Booking => ({
 
 export default function BookingsManager() {
   const { data: ops, refresh } = useOperations();
-  const { bookings: portalRequests, refresh: refreshPortal } = usePortalOps();
   const { data: cms } = useCms();
   const { notify } = useToast();
-  const [tab, setTab] = useState<"bookings" | "requests">("bookings");
   const [editing, setEditing] = useState<Booking | null>(null);
   const [sendingReminder, setSendingReminder] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -81,49 +75,6 @@ export default function BookingsManager() {
   const revenue30 = bookings
     .filter((b) => new Date(b.createdAt) > new Date(Date.now() - 30 * 86400000))
     .reduce((s, b) => s + b.paidAmount, 0);
-
-  const pendingRequests = portalRequests.filter((r) => r.status === "pending").length;
-
-  const confirmRequest = async (r: typeof portalRequests[number]) => {
-    const nights = nightsBetween(r.check_in, r.check_out);
-    const booking: Booking = {
-      id: uid("bkg"),
-      reference: r.reference || generateReference("MT"),
-      guestId: "",
-      guestName: r.guest_name,
-      guestPhone: r.guest_phone,
-      roomType: r.room_type,
-      checkIn: r.check_in,
-      checkOut: r.check_out,
-      guests: r.guests,
-      amount: r.amount,
-      paidAmount: 0,
-      status: "confirmed",
-      source: "other",
-      notes: r.notes || "",
-      packageId: "",
-      createdAt: r.created_at || new Date().toISOString(),
-    };
-    const bookingOk = await upsertBooking(booking);
-    const requestOk = await updatePortalBookingStatus(r.id, "confirmed");
-    if (!bookingOk || !requestOk) {
-      notify("Could not confirm this request", "info");
-      return;
-    }
-    await Promise.all([refresh(), refreshPortal()]);
-    notify(`Booking confirmed — ${booking.reference} (${nights} nights)`);
-  };
-
-  const cancelRequest = async (r: typeof portalRequests[number]) => {
-    if (!window.confirm(`Cancel booking request from ${r.guest_name}?`)) return;
-    const ok = await updatePortalBookingStatus(r.id, "cancelled");
-    if (!ok) {
-      notify("Could not cancel this request", "info");
-      return;
-    }
-    await refreshPortal();
-    notify("Request cancelled");
-  };
 
   const save = async (booking: Booking) => {
     const exists = bookings.some((b) => b.id === booking.id);
@@ -235,15 +186,6 @@ export default function BookingsManager() {
         }
       />
 
-      <TabBar
-        tabs={[
-          { key: "bookings", label: "Bookings" },
-          { key: "requests", label: `Requests${pendingRequests ? ` (${pendingRequests})` : ""}` },
-        ]}
-        active={tab}
-        onChange={(k) => setTab(k as "bookings" | "requests")}
-      />
-
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <KpiCard
           label="Check-ins today"
@@ -255,236 +197,145 @@ export default function BookingsManager() {
         <KpiCard label="Revenue (30d)" value={formatPHP(revenue30)} tone="positive" />
       </div>
 
-      {tab === "bookings" && (
-        <>
-          <div className="mb-4 flex flex-wrap items-center gap-3">
-            <div className="relative max-w-xs flex-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#26221C]/30" />
-              <Input
-                placeholder="Search guest, reference…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
-              />
-            </div>
-            <Select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as any)}
-              className="max-w-[180px]"
-            >
-              <option value="all">All statuses</option>
-              <option value="pending">Pending</option>
-              <option value="confirmed">Confirmed</option>
-              <option value="checked_in">Checked in</option>
-              <option value="checked_out">Checked out</option>
-              <option value="cancelled">Cancelled</option>
-            </Select>
-          </div>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="relative max-w-xs flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#26221C]/30" />
+          <Input
+            placeholder="Search guest, reference…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        <Select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value as any)}
+          className="max-w-[180px]"
+        >
+          <option value="all">All statuses</option>
+          <option value="pending">Pending</option>
+          <option value="confirmed">Confirmed</option>
+          <option value="checked_in">Checked in</option>
+          <option value="checked_out">Checked out</option>
+          <option value="cancelled">Cancelled</option>
+        </Select>
+      </div>
 
-          {filtered.length === 0 ? (
-            <EmptyState
-              title="No bookings yet"
-              description="Create your first booking to get started."
-            />
-          ) : (
-            <OpsTable>
-              <thead>
-                <tr>
-                  <OpsTH>Reference</OpsTH>
-                  <OpsTH>Guest</OpsTH>
-                  <OpsTH>Room / Package</OpsTH>
-                  <OpsTH>Dates</OpsTH>
-                  <OpsTH>Amount</OpsTH>
-                  <OpsTH>Status</OpsTH>
-                  <OpsTH className="text-right">Actions</OpsTH>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((b) => {
-                  const nights = nightsBetween(b.checkIn, b.checkOut);
-                  const owed = b.amount - b.paidAmount;
-                  return (
-                    <tr key={b.id} className="hover:bg-[#FAF6EF]/60">
-                      <OpsTD>
-                        <div className="font-mono text-xs text-[#26221C]/60">{b.reference}</div>
-                        <div className="text-[10px] uppercase tracking-wide text-[#26221C]/35">
-                          {b.source.replace(/_/g, " ")}
-                        </div>
-                      </OpsTD>
-                      <OpsTD>
-                        <div className="font-medium">{b.guestName || "—"}</div>
-                        <div className="text-xs text-[#26221C]/45">
-                          {b.guests} guest{b.guests !== 1 ? "s" : ""}
-                        </div>
-                      </OpsTD>
-                      <OpsTD>{b.roomType}</OpsTD>
-                      <OpsTD>
-                        <div className="text-xs">
-                          {formatDate(b.checkIn)} → {formatDate(b.checkOut)}
-                        </div>
-                        <div className="text-[10px] text-[#26221C]/45">
-                          {nights} night{nights !== 1 ? "s" : ""}
-                        </div>
-                      </OpsTD>
-                      <OpsTD>
-                        <div className="font-medium">{formatPHP(b.amount)}</div>
-                        <div className={`text-xs ${owed > 0 ? "text-red-600" : "text-green-700"}`}>
-                          {owed > 0 ? `${formatPHP(owed)} owed` : "Paid"}
-                        </div>
-                      </OpsTD>
-                      <OpsTD>
-                        <StatusPill value={b.status} />
-                      </OpsTD>
-                      <OpsTD className="text-right">
-                        <div className="flex justify-end gap-1">
-                          {b.status === "confirmed" && (
-                            <button
-                              onClick={() => setStatus(b.id, "checked_in")}
-                              className="rounded-md p-1.5 text-green-600 hover:bg-green-50"
-                              title="Check in"
-                            >
-                              <LogIn className="h-4 w-4" />
-                            </button>
-                          )}
-                          {b.status === "checked_in" && (
-                            <button
-                              onClick={() => setStatus(b.id, "checked_out")}
-                              className="rounded-md p-1.5 text-slate-600 hover:bg-slate-100"
-                              title="Check out"
-                            >
-                              <LogOut className="h-4 w-4" />
-                            </button>
-                          )}
-                          {owed > 0 && (
-                            <button
-                              onClick={() => recordPayment(b)}
-                              className="rounded-md p-1.5 text-[#C6A15B] hover:bg-[#C6A15B]/10"
-                              title="Record payment"
-                            >
-                              <CircleDollarSign className="h-4 w-4" />
-                            </button>
-                          )}
-                          {(b.status === "pending" || b.status === "confirmed") &&
-                            b.guestPhone.trim() && (
-                              <button
-                                onClick={() => sendReminder(b)}
-                                disabled={sendingReminder === b.id}
-                                className="rounded-md p-1.5 text-[#1EBE57] hover:bg-green-50 disabled:opacity-40"
-                                title="Send WhatsApp reminder"
-                              >
-                                <MessageCircle className="h-4 w-4" />
-                              </button>
-                            )}
+      {filtered.length === 0 ? (
+        <EmptyState
+          title="No bookings yet"
+          description="Create your first booking to get started."
+        />
+      ) : (
+        <OpsTable>
+          <thead>
+            <tr>
+              <OpsTH>Reference</OpsTH>
+              <OpsTH>Guest</OpsTH>
+              <OpsTH>Room / Package</OpsTH>
+              <OpsTH>Dates</OpsTH>
+              <OpsTH>Amount</OpsTH>
+              <OpsTH>Status</OpsTH>
+              <OpsTH className="text-right">Actions</OpsTH>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((b) => {
+              const nights = nightsBetween(b.checkIn, b.checkOut);
+              const owed = b.amount - b.paidAmount;
+              return (
+                <tr key={b.id} className="hover:bg-[#FAF6EF]/60">
+                  <OpsTD>
+                    <div className="font-mono text-xs text-[#26221C]/60">{b.reference}</div>
+                    <div className="text-[10px] uppercase tracking-wide text-[#26221C]/35">
+                      {b.source.replace(/_/g, " ")}
+                    </div>
+                  </OpsTD>
+                  <OpsTD>
+                    <div className="font-medium">{b.guestName || "—"}</div>
+                    <div className="text-xs text-[#26221C]/45">
+                      {b.guests} guest{b.guests !== 1 ? "s" : ""}
+                    </div>
+                  </OpsTD>
+                  <OpsTD>{b.roomType}</OpsTD>
+                  <OpsTD>
+                    <div className="text-xs">
+                      {formatDate(b.checkIn)} → {formatDate(b.checkOut)}
+                    </div>
+                    <div className="text-[10px] text-[#26221C]/45">
+                      {nights} night{nights !== 1 ? "s" : ""}
+                    </div>
+                  </OpsTD>
+                  <OpsTD>
+                    <div className="font-medium">{formatPHP(b.amount)}</div>
+                    <div className={`text-xs ${owed > 0 ? "text-red-600" : "text-green-700"}`}>
+                      {owed > 0 ? `${formatPHP(owed)} owed` : "Paid"}
+                    </div>
+                  </OpsTD>
+                  <OpsTD>
+                    <StatusPill value={b.status} />
+                  </OpsTD>
+                  <OpsTD className="text-right">
+                    <div className="flex justify-end gap-1">
+                      {b.status === "confirmed" && (
+                        <button
+                          onClick={() => setStatus(b.id, "checked_in")}
+                          className="rounded-md p-1.5 text-green-600 hover:bg-green-50"
+                          title="Check in"
+                        >
+                          <LogIn className="h-4 w-4" />
+                        </button>
+                      )}
+                      {b.status === "checked_in" && (
+                        <button
+                          onClick={() => setStatus(b.id, "checked_out")}
+                          className="rounded-md p-1.5 text-slate-600 hover:bg-slate-100"
+                          title="Check out"
+                        >
+                          <LogOut className="h-4 w-4" />
+                        </button>
+                      )}
+                      {owed > 0 && (
+                        <button
+                          onClick={() => recordPayment(b)}
+                          className="rounded-md p-1.5 text-[#C6A15B] hover:bg-[#C6A15B]/10"
+                          title="Record payment"
+                        >
+                          <CircleDollarSign className="h-4 w-4" />
+                        </button>
+                      )}
+                      {(b.status === "pending" || b.status === "confirmed") &&
+                        b.guestPhone.trim() && (
                           <button
-                            onClick={() => setEditing(b)}
-                            className="rounded-md p-1.5 text-[#26221C]/50 hover:bg-[#26221C]/5"
-                            title="Edit"
+                            onClick={() => sendReminder(b)}
+                            disabled={sendingReminder === b.id}
+                            className="rounded-md p-1.5 text-[#1EBE57] hover:bg-green-50 disabled:opacity-40"
+                            title="Send WhatsApp reminder"
                           >
-                            <Pencil className="h-4 w-4" />
+                            <MessageCircle className="h-4 w-4" />
                           </button>
-                          <button
-                            onClick={() => remove(b)}
-                            className="rounded-md p-1.5 text-red-400 hover:bg-red-50"
-                            title="Delete"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </OpsTD>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </OpsTable>
-          )}
-        </>
-      )}
-
-      {tab === "requests" && (
-        <>
-          {portalRequests.length === 0 ? (
-            <EmptyState
-              title="No booking requests"
-              description="Booking requests submitted by guests via TALA or the website appear here."
-            />
-          ) : (
-            <OpsTable>
-              <thead>
-                <tr>
-                  <OpsTH>Reference</OpsTH>
-                  <OpsTH>Guest</OpsTH>
-                  <OpsTH>Room</OpsTH>
-                  <OpsTH>Dates</OpsTH>
-                  <OpsTH>Guests</OpsTH>
-                  <OpsTH>Amount</OpsTH>
-                  <OpsTH>Status</OpsTH>
-                  <OpsTH className="text-right">Actions</OpsTH>
+                        )}
+                      <button
+                        onClick={() => setEditing(b)}
+                        className="rounded-md p-1.5 text-[#26221C]/50 hover:bg-[#26221C]/5"
+                        title="Edit"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => remove(b)}
+                        className="rounded-md p-1.5 text-red-400 hover:bg-red-50"
+                        title="Delete"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </OpsTD>
                 </tr>
-              </thead>
-              <tbody>
-                {portalRequests.map((r) => {
-                  const nights = nightsBetween(r.check_in, r.check_out);
-                  return (
-                    <tr key={r.id} className="hover:bg-[#FAF6EF]/60">
-                      <OpsTD>
-                        <span className="font-mono text-xs text-[#26221C]/60">
-                          {r.reference || "—"}
-                        </span>
-                      </OpsTD>
-                      <OpsTD>
-                        <div className="font-medium">{r.guest_name}</div>
-                        <div className="text-xs text-[#26221C]/45">
-                          {r.guest_phone || "—"}
-                        </div>
-                      </OpsTD>
-                      <OpsTD className="max-w-[200px] truncate">{r.room_type}</OpsTD>
-                      <OpsTD>
-                        <div className="text-xs">
-                          {formatDate(r.check_in)} → {formatDate(r.check_out)}
-                        </div>
-                        <div className="text-[10px] text-[#26221C]/45">
-                          {nights} night{nights !== 1 ? "s" : ""}
-                        </div>
-                      </OpsTD>
-                      <OpsTD>{r.guests}</OpsTD>
-                      <OpsTD>
-                        <div className="font-medium">{formatPHP(r.amount)}</div>
-                        <div className="text-[10px] text-[#26221C]/40">
-                          {formatDate(r.created_at)}
-                        </div>
-                      </OpsTD>
-                      <OpsTD>
-                        <StatusPill value={r.status} />
-                      </OpsTD>
-                      <OpsTD className="text-right">
-                        <div className="flex justify-end gap-1">
-                          {r.status === "pending" && (
-                            <button
-                              onClick={() => confirmRequest(r)}
-                              className="rounded-md p-1.5 text-blue-500 hover:bg-blue-50"
-                              title="Confirm & create booking"
-                            >
-                              <CheckCircle className="h-4 w-4" />
-                            </button>
-                          )}
-                          {!["confirmed", "cancelled"].includes(r.status) && (
-                            <button
-                              onClick={() => cancelRequest(r)}
-                              className="rounded-md p-1.5 text-red-400 hover:bg-red-50"
-                              title="Cancel"
-                            >
-                              <XCircle className="h-4 w-4" />
-                            </button>
-                          )}
-                        </div>
-                      </OpsTD>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </OpsTable>
-          )}
-        </>
+              );
+            })}
+          </tbody>
+        </OpsTable>
       )}
 
       {editing && <BookingModal booking={editing} onClose={() => setEditing(null)} onSave={save} />}

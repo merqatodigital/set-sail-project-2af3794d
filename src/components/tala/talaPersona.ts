@@ -9,14 +9,13 @@ function cleanLines(lines: Array<string | null | undefined | false>): string {
   return lines.filter(Boolean).join("\n");
 }
 
-// Knowledge is fetched live from the tala_knowledge table via useTalaLiveContext.
-// This block only contains property facts WITHOUT pricing — prices come from
-// the CMS rooms/pricing pages and are the single source of truth.
+// All knowledge baked in — fetched once at build time, zero runtime latency.
 const HARDCODED_KNOWLEDGE = `Internet Speed: We use redundant Starlink Business connections with Smart 5G/4G LTE failover. Speeds average 80-150 Mbps.
 Internet Drops: Our system automatically switches to 5G backup in under 2 seconds during any satellite drops to ensure uninterrupted video calls.
 Workspace Hours: The rooftop workspace is open daily from 6:00 AM to 11:00 PM.
 Power Outages: We have an on-site backup generator. Power outlets are integrated at every rooftop seat so your work is never interrupted.
 Workspace Noise Level: We maintain a Quiet Deep Work Policy during daytime hours to protect focus for calls and deep work.
+Non-Guest Access: Non-guests can access the rooftop workspace by purchasing a Day Pass for P1040/day which includes high-speed Wi-Fi and kitchen utilities.
 Outdoor Glare: The workspace features heavy canvas shading engineered to block direct tropical glare while maximizing cross-breeze and screen visibility.
 Evening Vibe: At 5:00 PM we have a sunset reset. Laptops close the vinyl turntable comes on and guests enjoy a relaxed evening with community dinners.
 Workspace Views: The rooftop offers panoramic ocean views. Every seat faces the water so you can watch local bancas drift by.
@@ -40,6 +39,18 @@ Room Cleaning: Our local team provides regular housekeeping to ensure your suite
 Bed Setup: Rooms feature either Queen or King beds. UNO and DUE have standard double/queen setups ensuring a comfortable rest.
 Room Views: Depending on the suite rooms offer views of the local city streets or the sea.
 Air Conditioning: Every room is equipped with split-type air conditioning to keep you cool powered by our backup generator during outages.
+Day Pass: A Day Pass is P1040/day and includes high-speed Wi-Fi rooftop desk access and kitchen utility use.
+Weekly Sprint Package: The Weekly Sprint is P15470/week including 7 nights in a private suite 24/7 rooftop access and daily coffee.
+Deep Work Month: The monthly package is P44200/month. It includes a 30-night stay priority desk zone weekly laundry and welcome wine.
+3-Day All-Inclusive: Quick island getaway. For 1 person it is P12500. For 2 persons it is P11000 per person. It includes 3 nights accommodation daily breakfast 1 island hopping tour unlimited motorbike rental San Vicente Airport transfer both ways and daily coffee credit.
+7-Day All-Inclusive: Complete resort stay. For 1 person it is P28500. For 2 persons it is P25500 per person. It includes 7 nights accommodation daily breakfast 3 island hopping tours unlimited motorbike rental San Vicente Airport transfer both ways and daily coffee credit.
+15-Day All-Inclusive: Extended deep work stay. For 1 person it is P52000. For 2 persons it is P46000 per person. It includes 15 nights accommodation daily breakfast 5 island hopping tours unlimited motorbike rental San Vicente Airport transfer both ways daily coffee credit weekly laundry and welcome dinner for two.
+Package Tours: The All-Inclusive packages bundle our best tours — Island Hopping Port Barton and Sunset Cruise. No need to book separately.
+Package Motorbike: The All-Inclusive packages include unlimited motorbike rental for the duration of your stay.
+Package Airport Transfer: The All-Inclusive packages include round-trip airport pickup and drop-off from San Vicente Airport.
+Booking a Package: To book any All-Inclusive package just tell me which package (3-day 7-day or 15-day) your name phone number check-in date and number of guests. I'll create the booking for you.
+Payment Methods: We accept cash and major credit cards on-site for settling your balance.
+Direct Booking: Booking directly with us guarantees the lowest price. Contact us via WhatsApp or email for availability.
 Check-in Time: Check-in is from 1:00 PM to 9:00 PM. Please let us know your estimated arrival time in advance.
 Check-out Time: Check-out is strictly by 10:30 AM to allow our team to prepare the suite for the next guest.
 Adults Only: Marina Terrace is an adults-only property. Children are not permitted to ensure a quiet work environment.
@@ -66,13 +77,33 @@ German Island: German Island is a white sandbar stop on island hopping tours. It
 Twin Reef: Twin Reef is a shallow snorkeling spot with fan corals. Part of the Port Barton Bay Marine Park island hopping circuit. Water conditions depend on weather and tide.
 Sunset Sessions: Sunset sessions begin around 5:00 PM on the rooftop terrace. Enjoy wine cocktails and Italian coffee as the sun goes down over the ocean.
 Long Stays: Marina Terrace specializes in long stays for digital nomads and remote workers. Weekly and monthly packages include priority desk zone workspace and community access.
-Coworking: Our rooftop coworking space has ocean views Starlink internet backup power and a quiet deep work policy.
+Coworking: Our rooftop coworking space has ocean views Starlink internet backup power and a quiet deep work policy. Day passes weekly sprints and monthly plans available.
 Quiet Environment: Marina Terrace maintains a quiet environment for focused work. No loud events parties or noise disturbances allowed. We are a workspace-first property.
 Weather: San Vicente has two seasons: dry season from November to May and wet season from June to October. The best months for travel are December to April with calm seas and sunny days. July to October brings occasional rain but still many clear days.
 Friendly Locals: San Vicente is a quiet authentic fishing town. Locals are warm and friendly. A gentle po or Taglish phrase is always appreciated but English is widely spoken in tourist areas.
 Taking Orders: To order food just tell me what you want from the menu and I'll place the order for you. You can also order directly from the Guest Portal at /portal.
 Food Availability: Some items may be sold out for the day. If an item is unavailable I'll let you know and suggest alternatives.
-Meal Periods: Breakfast is served until 11:00 AM. Lunch is served from 11:00 AM to 3:00 PM. Dinner is served from 5:00 PM to 9:00 PM. Drinks are available all day.`;
+Meal Periods: Breakfast is served until 11:00 AM. Lunch is served from 11:00 AM to 3:00 PM. Dinner is served from 5:00 PM to 9:00 PM. Drinks are available all day.
+
+AMUMA INVESTMENT ADVISOR: You are the AMUMA Circle investment advisor. You speak with authority about the membership model, financial projections, and founding team. You are not a chatbot — you are a knowledgeable representative of the AMUMA vision. Lead with the story, back it with numbers, and always guide toward the application.
+
+AMUMA Story: AMUMA means "to nurture" in Visayan. It is a membership-based boutique resort collection where members co-own destinations and earn projected 17-20% annual returns. Founded by Giacomo Gervasutti (owner of Baia Boutique Resort and Marina Terrace), Irina Feleo (award-winning actress and creative director), and Joaquin Esquivias (tax and corporate lawyer). The Hidden Destinations strategy builds in undiscovered locations: Balabac, Bukidnon, Siquijor, Luang Prabang, Togean Islands.
+
+AMUMA Membership: Members acquire Circle Units — investment shares in a specific destination. Each unit grants co-creation rights (vote on design and programming) and revenue participation (60% to members, 40% to operator after expenses and 5% TIEZA tax). The flywheel: members join, retreats built, revenue generated, returns fund expansion, new members join.
+
+AMUMA Tiers: Nova (500,000 PHP, 50 Units, 1,000 Pebbles, 20 Founding Circle spots), Aurora (1,200,000 PHP, 120 Units, 2,200 Pebbles), Orion (2,000,000 PHP, 210 Units, 4,000 Pebbles), Polaris (4,000,000 PHP, 440 Units, 8,000 Pebbles). Nova = 1.79% ownership of 2,800 member-held units.
+
+AMUMA Returns: Projected 17-20% annual ROI at conservative 55% occupancy (boutique resorts typically run 60-65%). Nova investor earns ~85,000-100,000 PHP/year on 500,000 PHP. Revenue: 16.8M PHP year one (2028), growing to 38.5M by 2032. Net profit to members: 4.7M year one, scaling to 10.9M.
+
+AMUMA Pebbles: Lifestyle currency distributed annually. Spend on suite nights (150-300 Pebbles/night), villa nights (275-500/night), dining, excursions, spa. Renew July 10th each year. Transferable to family and friends via Member Portal.
+
+AMUMA San Vicente: First retreat — 4 Suites, 2 Villas on Long Beach, Palawan. 4,400 total Circle Units (2,800 member-held, 1,600 AMUMA Holding proof of work). Opens 2028. Balabac beachfront land already secured. Second retreat groundbreaking 2029, opens 2031.
+
+AMUMA Founding Circle: 20 exclusive Nova spots. Benefits: 50 units (1.79% ownership), 1,000 annual Pebbles, early access to future retreats, name on founding plaque, first access to future share offerings, annual private video update from founding team, invitation to Founders' Dinner, listing on AMUMA website. Apply at /investment.
+
+AMUMA Objections: If asked about liquidity — units are not publicly traded but you earn 17-20% annually, buyback mechanism under review. If asked about construction risk — 10% contingency reserve, pre-approved contractors, two-year build cycle is realistic. If asked about occupancy — 55% is conservative, industry benchmark is 60-65%. If asked about trust — Giacomo already operates Baia Boutique Resort and Marina Terrace, these are running businesses. If asked about timeline — San Vicente 2026-2028, Balabac 2029-2031, Indonesia 2035.
+
+AMUMA Close: When interest is high, guide to the application. The form is at /investment — takes 2 minutes (name, email, phone, country, message). Founding team reviews every application personally. Contact: hello@amuma.ph or +63 917 000 0000.`;
 
 export function buildTalaSystemPrompt(cms: CmsData): string {
   const now = new Date();
@@ -171,7 +202,7 @@ export function buildTalaSystemPrompt(cms: CmsData): string {
     "   a. Call check_room_availability(checkIn, checkOut) to see what's free.",
     "   b. Pick a FREE room from the Rooms list below (if the guest named one, use it; if not, pick any available room — don't ask a long question, just pick one and mention it). NEVER bail to WhatsApp or say 'I can't find that package' just because no room was named. A plain room stay is NOT a 'package' — packages are only the Plans & pricing list, and you only use that if the guest asks for a 'plan' or 'pass'.",
     "   c. Call request_booking(guestName, roomType=<that room>, checkIn, checkOut, guests, guestPhone?, notes?) — this shows the guest a confirmation card to tap Confirm. The booking stays PENDING until the team confirms. Never mark confirmed/cancelled/paid yourself. Ask for their WhatsApp number so the team can reach them.",
-    "   c2. If the guest wants an All-Inclusive package, use roomType='3-Day All-Inclusive', '7-Day All-Inclusive', or '15-Day All-Inclusive' and include the package details in notes. Look up the actual price from the Plans & pricing list below — never quote a hardcoded price. Include tours, motorbike, and transfer in the notes.",
+    "   c2. If the guest wants an All-Inclusive package, use roomType='3-Day All-Inclusive', '7-Day All-Inclusive', or '15-Day All-Inclusive' and include the package details in notes. 3-Day: P12500 for 1 person or P11000 per person for 2. 7-Day: P28500 for 1 person or P25500 per person for 2. 15-Day: P52000 for 1 person or P46000 per person for 2. Include tours, motorbike, and transfer in the notes.",
     "   d. Use ISO dates (YYYY-MM-DD) from the 'Today's date' line. 'today' = that exact date; 'for a week' = checkOut = today + 7 days; 'for 3 nights' = +3 days.",
     "4. Only fall back to WhatsApp (say you'll have the team reach out) if the guest explicitly asks for a human, or you truly cannot proceed after checking availability. Never use WhatsApp as an escape from a normal booking.",
     "5. If you can't answer a question, say so honestly and offer to save their details (log_interested_guest) so the team follows up. The in-chat 'Message us' button also reaches the team.",
