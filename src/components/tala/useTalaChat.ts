@@ -191,7 +191,7 @@ export function useTalaChat(): UseTalaChat {
 
   const send = useCallback(async (
     text: string,
-    _systemPrompt: string,
+    systemPrompt: string,
     options?: { model?: string; adminApiKey?: string; cms?: CmsData; owner?: boolean; onDelta?: (delta: string) => void },
   ): Promise<string | null> => {
     const trimmed = text.trim();
@@ -200,6 +200,11 @@ export function useTalaChat(): UseTalaChat {
     setError(null);
     setThinking(true);
     const turnStart = performance.now();
+
+    const priorTurns = messagesRef.current
+      .filter((m) => m.role === "user" || m.role === "assistant")
+      .slice(-8)
+      .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
 
     const userMsg: TalaMessage = { id: newId(), role: "user", content: trimmed };
     const history: TalaMessage[] = [...messagesRef.current, userMsg];
@@ -220,6 +225,9 @@ export function useTalaChat(): UseTalaChat {
         model: options?.model,
         owner: options?.owner,
         signal: controller.signal,
+        systemPrompt,
+        history: priorTurns,
+
         onDelta: (delta) => {
           if (firstTokenMs === null) {
             firstTokenMs = Math.round(performance.now() - turnStart);
