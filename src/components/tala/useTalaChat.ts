@@ -48,6 +48,8 @@ async function askCloudflareAgent(
     owner?: boolean;
     signal?: AbortSignal;
     onDelta?: (delta: string) => void;
+    systemPrompt?: string;
+    history?: Array<{ role: "user" | "assistant"; content: string }>;
   },
 ): Promise<AssistantReply> {
   if (!text.trim()) throw new Error("Empty message.");
@@ -65,12 +67,15 @@ async function askCloudflareAgent(
     model: opts?.model,
     authToken,
     signal: opts?.signal,
+    systemPrompt: opts?.systemPrompt,
+    history: opts?.history,
   };
   const result = opts?.onDelta ? await talaChatStream(payload, opts.onDelta) : await talaChat(payload);
   const content = result.content?.trim() || "";
   if (!content) throw new Error("TALA returned an empty reply.");
   return { content, timing: result.timing };
 }
+
 
 export interface RequestDayPassInput {
   guestName: string;
