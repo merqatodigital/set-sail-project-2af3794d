@@ -48,8 +48,6 @@ async function askCloudflareAgent(
     owner?: boolean;
     signal?: AbortSignal;
     onDelta?: (delta: string) => void;
-    systemPrompt?: string;
-    history?: Array<{ role: "user" | "assistant"; content: string }>;
   },
 ): Promise<AssistantReply> {
   if (!text.trim()) throw new Error("Empty message.");
@@ -67,15 +65,12 @@ async function askCloudflareAgent(
     model: opts?.model,
     authToken,
     signal: opts?.signal,
-    systemPrompt: opts?.systemPrompt,
-    history: opts?.history,
   };
   const result = opts?.onDelta ? await talaChatStream(payload, opts.onDelta) : await talaChat(payload);
   const content = result.content?.trim() || "";
   if (!content) throw new Error("TALA returned an empty reply.");
   return { content, timing: result.timing };
 }
-
 
 export interface RequestDayPassInput {
   guestName: string;
@@ -191,7 +186,7 @@ export function useTalaChat(): UseTalaChat {
 
   const send = useCallback(async (
     text: string,
-    systemPrompt: string,
+    _systemPrompt: string,
     options?: { model?: string; adminApiKey?: string; cms?: CmsData; owner?: boolean; onDelta?: (delta: string) => void },
   ): Promise<string | null> => {
     const trimmed = text.trim();
@@ -200,11 +195,6 @@ export function useTalaChat(): UseTalaChat {
     setError(null);
     setThinking(true);
     const turnStart = performance.now();
-
-    const priorTurns = messagesRef.current
-      .filter((m) => m.role === "user" || m.role === "assistant")
-      .slice(-8)
-      .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
 
     const userMsg: TalaMessage = { id: newId(), role: "user", content: trimmed };
     const history: TalaMessage[] = [...messagesRef.current, userMsg];
@@ -225,9 +215,6 @@ export function useTalaChat(): UseTalaChat {
         model: options?.model,
         owner: options?.owner,
         signal: controller.signal,
-        systemPrompt,
-        history: priorTurns,
-
         onDelta: (delta) => {
           if (firstTokenMs === null) {
             firstTokenMs = Math.round(performance.now() - turnStart);
