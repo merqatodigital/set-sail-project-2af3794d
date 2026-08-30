@@ -165,7 +165,12 @@ export async function talaChatStream(
   input: TalaChatInput,
   onDelta: (text: string) => void,
 ): Promise<TalaChatResult> {
-  const base = talaWorkerBase();
+  let base: string;
+  try {
+    base = talaWorkerBase();
+  } catch {
+    return talaChat(input);
+  }
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "text/event-stream",
@@ -193,19 +198,16 @@ export async function talaChatStream(
     // deployment that predates streaming) degrades to the buffered call so TALA
     // still answers.
     if ((e as Error)?.name === "AbortError") throw e;
-    console.warn("[TALA] streaming unavailable, using buffered reply.", e);
     return talaChat(input);
   }
 
   const ctype = res.headers.get("Content-Type") || "";
   if (!res.ok || !res.body || !ctype.includes("text/event-stream")) {
-    if (!res.ok) {
-      const data = (await res.json().catch(() => null)) as { error?: string } | null;
-      throw new Error(data?.error || `TALA service error (HTTP ${res.status})`);
-    }
-    // Non-SSE response — fall back to the buffered path.
+    // Any non-SSE outcome (error page, offline worker, older deploy) falls back
+    // to the buffered path, which in turn falls back to the Cloud backup.
     return talaChat(input);
   }
+
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
