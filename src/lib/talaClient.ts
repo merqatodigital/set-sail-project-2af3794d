@@ -63,11 +63,55 @@ export interface TalaChatInput {
   guestName?: string;
   guestRoom?: string;
   signal?: AbortSignal;
+  /** Live system prompt (CMS + knowledge base) used by the backup backend. */
+  systemPrompt?: string;
+  /** Prior turns, used by the backup backend for continuity. */
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
 }
 
-/** Single POST to the Cloudflare TallaAgent. */
+/**
+ * Backup backend — the Lovable Cloud `tala-chat` function. Used whenever the
+ * Cloudflare Worker is unreachable (network error, DNS, CORS, worker offline)
+ * so TALA always answers instead of showing "Failed to fetch".
+ */
+async function talaChatBackup(input: TalaChatInput): Promise<TalaChatResult> {
+  const env = import.meta.env as unknown as Record<string, string | undefined>;
+  const url = (env.VITE_SUPABASE_URL || "").replace(/\/+$/, "");
+  const key = env.VITE_SUPABASE_PUBLISHABLE_KEY || env.VITE_SUPABASE_ANON_KEY || "";
+  if (!url || !key) throw new Error("TALA is temporarily unavailable. Please try again shortly.");
+
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [];
+  if (input.systemPrompt?.trim()) messages.push({ role: "system", content: input.systemPrompt });
+  for (const m of input.history ?? []) {
+    if (m?.content?.trim()) messages.push({ role: m.role, content: m.content });
+  }
+  messages.push({ role: "user", content: input.message });
+
+  const res = await fetch(`${url}/functions/v1/tala-chat`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+    },
+    body: JSON.stringify({ messages, model: input.model || undefined }),
+    signal: input.signal,
+  });
+  const data = (await res.json().catch(() => null)) as
+    | { reply?: string; content?: string; error?: string; model?: string }
+    | null;
+  if (!res.ok) throw new Error(data?.error || `TALA service error (HTTP ${res.status})`);
+  return { content: data?.reply ?? data?.content ?? null, model: data?.model };
+}
+
+/** Single POST to the Cloudflare TallaAgent, with the Cloud backup as fallback. */
 export async function talaChat(input: TalaChatInput): Promise<TalaChatResult> {
-  const base = talaWorkerBase();
+  let base: string;
+  try {
+    base = talaWorkerBase();
+  } catch {
+    return talaChatBackup(input);
+  }
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (input.authToken) {
     headers.Authorization = `Bearer ${input.authToken}`;
@@ -76,26 +120,39 @@ export async function talaChat(input: TalaChatInput): Promise<TalaChatResult> {
     // header so the Worker's TALA_DEV_MODE bypass grants owner access in staging.
     headers["X-Dev-Tenant"] = TALA_TENANT;
   }
-  const res = await fetch(`${base}/api/talla/chat`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      message: input.message,
-      tenantId: input.tenantId ?? TALA_TENANT,
-      role: input.role ?? "guest",
-      userId: input.userId,
-      model: input.model || undefined,
-      guestName: input.guestName,
-      guestRoom: input.guestRoom,
-    }),
-    signal: input.signal,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${base}/api/talla/chat`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        message: input.message,
+        tenantId: input.tenantId ?? TALA_TENANT,
+        role: input.role ?? "guest",
+        userId: input.userId,
+        model: input.model || undefined,
+        guestName: input.guestName,
+        guestRoom: input.guestRoom,
+      }),
+      signal: input.signal,
+    });
+  } catch (e) {
+    if ((e as Error)?.name === "AbortError") throw e;
+    return talaChatBackup(input);
+  }
   const data = (await res.json().catch(() => null)) as
     | { content?: string; error?: string; model?: string; usage?: unknown; timing?: Record<string, number | string> }
     | null;
-  if (!res.ok) throw new Error(data?.error || `TALA service error (HTTP ${res.status})`);
-  return { content: data?.content ?? null, model: data?.model, usage: data?.usage, timing: data?.timing };
+  if (!res.ok) {
+    // Worker offline / misrouted (404, 5xx, Cloudflare error page) — use backup.
+    if (res.status === 404 || res.status >= 500) return talaChatBackup(input);
+    throw new Error(data?.error || `TALA service error (HTTP ${res.status})`);
+  }
+  const content = data?.content ?? null;
+  if (!content) return talaChatBackup(input);
+  return { content, model: data?.model, usage: data?.usage, timing: data?.timing };
 }
+
 
 /**
  * Streaming variant — consumes the Worker's existing SSE endpoint so text
@@ -108,7 +165,12 @@ export async function talaChatStream(
   input: TalaChatInput,
   onDelta: (text: string) => void,
 ): Promise<TalaChatResult> {
-  const base = talaWorkerBase();
+  let base: string;
+  try {
+    base = talaWorkerBase();
+  } catch {
+    return talaChat(input);
+  }
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "text/event-stream",
@@ -136,19 +198,16 @@ export async function talaChatStream(
     // deployment that predates streaming) degrades to the buffered call so TALA
     // still answers.
     if ((e as Error)?.name === "AbortError") throw e;
-    console.warn("[TALA] streaming unavailable, using buffered reply.", e);
     return talaChat(input);
   }
 
   const ctype = res.headers.get("Content-Type") || "";
   if (!res.ok || !res.body || !ctype.includes("text/event-stream")) {
-    if (!res.ok) {
-      const data = (await res.json().catch(() => null)) as { error?: string } | null;
-      throw new Error(data?.error || `TALA service error (HTTP ${res.status})`);
-    }
-    // Non-SSE response — fall back to the buffered path.
+    // Any non-SSE outcome (error page, offline worker, older deploy) falls back
+    // to the buffered path, which in turn falls back to the Cloud backup.
     return talaChat(input);
   }
+
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();

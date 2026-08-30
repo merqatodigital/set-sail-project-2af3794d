@@ -138,8 +138,13 @@ function getAllowedOrigin(req: Request): string {
   if (ALLOWED_ORIGINS.includes(origin)) return origin;
   // Allow localhost for development
   if (/^https?:\/\/localhost(:\d+)?$/.test(origin)) return origin;
+  // Allow the project's own preview / published hosts
+  if (/^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.(lovable\.app|lovableproject\.com)$/i.test(origin)) {
+    return origin;
+  }
   return ALLOWED_ORIGINS[0];
 }
+
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*", // replaced per-request below
