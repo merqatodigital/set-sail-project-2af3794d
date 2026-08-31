@@ -52,6 +52,8 @@ export interface TalaChatResult {
 
 export interface TalaChatInput {
   message: string;
+  /** Current CMS + knowledge-base instructions used by the backend fallback. */
+  systemPrompt?: string;
   /** Context hint only — the Worker authorizes owners via the bearer token. */
   role?: "guest" | "owner";
   /** Stable session id so the Durable Object remembers this conversation. */
@@ -65,9 +67,29 @@ export interface TalaChatInput {
   signal?: AbortSignal;
 }
 
+async function talaBackendFallback(input: TalaChatInput): Promise<TalaChatResult> {
+  const { supabase } = await import("@/integrations/supabase/client");
+  const messages = [
+    input.systemPrompt ? { role: "system", content: input.systemPrompt } : null,
+    { role: "user", content: input.message },
+  ].filter((message): message is { role: string; content: string } => message !== null);
+  const { data, error } = await supabase.functions.invoke("tala-chat", {
+    body: { messages, model: input.model || undefined },
+  });
+  if (error) throw new Error(error.message || "TALA backend is unavailable.");
+  const result = data as { reply?: string; content?: string; error?: string } | null;
+  if (result?.error) throw new Error(result.error);
+  return { content: result?.reply ?? result?.content ?? null };
+}
+
 /** Single POST to the Cloudflare TallaAgent. */
 export async function talaChat(input: TalaChatInput): Promise<TalaChatResult> {
-  const base = talaWorkerBase();
+  let base: string;
+  try {
+    base = talaWorkerBase();
+  } catch {
+    return talaBackendFallback(input);
+  }
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (input.authToken) {
     headers.Authorization = `Bearer ${input.authToken}`;
@@ -76,24 +98,33 @@ export async function talaChat(input: TalaChatInput): Promise<TalaChatResult> {
     // header so the Worker's TALA_DEV_MODE bypass grants owner access in staging.
     headers["X-Dev-Tenant"] = TALA_TENANT;
   }
-  const res = await fetch(`${base}/api/talla/chat`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      message: input.message,
-      tenantId: input.tenantId ?? TALA_TENANT,
-      role: input.role ?? "guest",
-      userId: input.userId,
-      model: input.model || undefined,
-      guestName: input.guestName,
-      guestRoom: input.guestRoom,
-    }),
-    signal: input.signal,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${base}/api/talla/chat`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        message: input.message,
+        tenantId: input.tenantId ?? TALA_TENANT,
+        role: input.role ?? "guest",
+        userId: input.userId,
+        model: input.model || undefined,
+        guestName: input.guestName,
+        guestRoom: input.guestRoom,
+      }),
+      signal: input.signal,
+    });
+  } catch (error) {
+    if ((error as Error)?.name === "AbortError") throw error;
+    return talaBackendFallback(input);
+  }
   const data = (await res.json().catch(() => null)) as
     | { content?: string; error?: string; model?: string; usage?: unknown; timing?: Record<string, number | string> }
     | null;
-  if (!res.ok) throw new Error(data?.error || `TALA service error (HTTP ${res.status})`);
+  if (!res.ok) {
+    if (res.status >= 500) return talaBackendFallback(input);
+    throw new Error(data?.error || `TALA service error (HTTP ${res.status})`);
+  }
   return { content: data?.content ?? null, model: data?.model, usage: data?.usage, timing: data?.timing };
 }
 
@@ -136,8 +167,8 @@ export async function talaChatStream(
     // deployment that predates streaming) degrades to the buffered call so TALA
     // still answers.
     if ((e as Error)?.name === "AbortError") throw e;
-    console.warn("[TALA] streaming unavailable, using buffered reply.", e);
-    return talaChat(input);
+    console.warn("[TALA] streaming unavailable, using backend fallback.");
+    return talaBackendFallback(input);
   }
 
   const ctype = res.headers.get("Content-Type") || "";
@@ -146,8 +177,9 @@ export async function talaChatStream(
       const data = (await res.json().catch(() => null)) as { error?: string } | null;
       throw new Error(data?.error || `TALA service error (HTTP ${res.status})`);
     }
-    // Non-SSE response — fall back to the buffered path.
-    return talaChat(input);
+    // Non-SSE response — use the independent backend path rather than retrying
+    // the same Worker host that just failed.
+    return talaBackendFallback(input);
   }
 
   const reader = res.body.getReader();
