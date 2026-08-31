@@ -44,6 +44,7 @@ export function getGuestSessionId(): string {
 async function askCloudflareAgent(
   text: string,
   opts?: {
+    systemPrompt?: string;
     model?: string;
     owner?: boolean;
     signal?: AbortSignal;
@@ -60,6 +61,7 @@ async function askCloudflareAgent(
   }
   const payload = {
     message: text,
+    systemPrompt: opts?.systemPrompt,
     role: (opts?.owner ? "owner" : "guest") as "owner" | "guest",
     userId,
     model: opts?.model,
@@ -212,6 +214,7 @@ export function useTalaChat(): UseTalaChat {
       let streamed = "";
       let firstTokenMs: number | null = null;
       const reply = await askCloudflareAgent(trimmed, {
+        systemPrompt: _systemPrompt,
         model: options?.model,
         owner: options?.owner,
         signal: controller.signal,
