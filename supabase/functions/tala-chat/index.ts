@@ -136,6 +136,8 @@ const ALLOWED_ORIGINS = [
 function getAllowedOrigin(req: Request): string {
   const origin = req.headers.get("origin") || "";
   if (ALLOWED_ORIGINS.includes(origin)) return origin;
+  if (/^https:\/\/[a-z0-9-]+\.lovable\.app$/i.test(origin)) return origin;
+  if (/^https:\/\/[a-z0-9-]+\.lovableproject\.com$/i.test(origin)) return origin;
   // Allow localhost for development
   if (/^https?:\/\/localhost(:\d+)?$/.test(origin)) return origin;
   return ALLOWED_ORIGINS[0];
