@@ -9,24 +9,26 @@ WhatsApp when they're ready to book.
 
 ## Is she actually agentic?
 
-Yes, with two real tools — this isn't just a chat completion wrapped in a
-persona prompt:
+Yes. Live chat goes to the **Cloudflare TallaAgent** Durable Object
+(`worker/`), which runs an OpenRouter tool loop against real Supabase + D1
+repos — not a persona prompt alone.
 
-- **`check_room_availability`** — reads live booking data (not the static
-  text in the prompt) and tells the guest, per room, whether it's actually
-  free for their dates.
-- **`log_interested_guest`** — when a guest shares a name/contact and clearly
-  wants a follow-up but the chat ends before they reach WhatsApp, she saves
-  it to a `tala_leads` table so the human team can call them back. See it
-  happen in real time in **Admin → TALA → Leads TALA has captured**.
+**Guest tools (examples):** `checkRoomAvailability`, `requestRoomBooking`,
+`requestTour`, `requestRental`, `createFoodOrder`, `requestHousekeeping`,
+`listMotorbikes`, `getGuestStayState`, folio/message reads.
 
-The model decides when to call these (OpenAI-style function-calling via
-OpenRouter); we execute them and hand the result back to her, and she keeps
-going from there. What she does **not** have is the actual KAPWA Python
-backend (LangGraph graph, approval workflow, audit trail, staff/inventory
-tools) — that would need the `agent-api` service deployed somewhere, which
-this integration deliberately avoids to keep everything running for free
-inside the existing site.
+**Owner/admin tools (examples):** `getTodayOperations`, `listBookings`,
+`listPendingRequests`, `confirmBooking` / `confirmTour` / `confirmRental`,
+`checkInGuest` / `checkOutGuest`, `listStaff`, `runPayroll`,
+`markPayRecordPaid`, `logPayment`, inventory/HK/maintenance, Computer workspace.
+
+Admin managers (`src/lib/opsRepo.ts`) and agent tools share the **same**
+Postgres tables (`bookings`, `staff_members`, `pay_records`, `motorbikes`,
+`tala_*_requests`, …). Owner HTTP surface: `/api/ops/*` (see
+`docs/TALA-AGENTIC-WIRING.md`).
+
+Role is decided server-side from the Supabase JWT → D1 `tenant_members` —
+the browser `role` field is context only.
 
 Everything is free or open source:
 

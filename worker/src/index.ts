@@ -25,6 +25,7 @@ import { handleWorkflows } from "./routes/workflows.js";
 import { handleComputer } from "./routes/computer.js";
 import { handleApprovals } from "./routes/approvals.js";
 import { handleEvents } from "./routes/events.js";
+import { handleOps } from "./routes/ops.js";
 import type { Env } from "./env.js";
 
 // Re-export TallaAgent for wrangler discovery
@@ -82,6 +83,11 @@ export default {
             d1: true,
             computer: env.TALLA_COMPUTER_ENABLED === "true" ? "enabled" : "disabled",
             workflows: true,
+            ops: true,
+            staffPayroll: true,
+            bookings: true,
+            rentals: true,
+            tours: true,
           },
           debug: {
             tallaComputerEnabled: env.TALLA_COMPUTER_ENABLED,
@@ -114,6 +120,8 @@ export default {
 
     if (path.startsWith("/api/tours")) {
       response = await handleTours(request, env, auth, path);
+    } else if (path.startsWith("/api/ops")) {
+      response = await handleOps(request, env, auth, path);
     } else if (path.startsWith("/api/requests")) {
       response = await handleGuestRequests(request, env, auth, path);
     } else if (path.startsWith("/api/settings")) {

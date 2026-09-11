@@ -165,13 +165,13 @@ describe("Phase 7 — Tool Registration Regression", () => {
   it("getTools returns D1 tools only when Computer disabled", () => {
     const tools = getTools("owner", false);
     expect(tools.filter((t) => t.name.startsWith("workspace"))).toHaveLength(0);
-    expect(tools.length).toBe(35);
+    expect(tools.length).toBe(49);
   });
 
   it("getTools adds 4 Computer tools when enabled for owner", () => {
     const tools = getTools("owner", true);
     expect(tools.filter((t) => t.name.startsWith("workspace"))).toHaveLength(4);
-    expect(tools.length).toBe(39);
+    expect(tools.length).toBe(53);
   });
 
   it("no Computer tools for guest or staff", () => {
@@ -188,7 +188,7 @@ describe("Phase 7 — System Prompt Regression", () => {
   it("includes Computer section when enabled for owner", () => {
     const p = buildSystemPrompt({ tenantId: "marina_terrace", role: "owner", guestName: null, guestRoom: null, propertyInfo: {}, tours: [], menuItems: [], computerEnabled: true });
     expect(p).toContain("COMPUTER WORKSPACE");
-    expect(p).toContain("D1 is authoritative");
+    expect(p).toContain("Supabase + D1 remain authoritative");
   });
 
   it("omits Computer section when disabled", () => {
@@ -326,8 +326,8 @@ describe("Phase 7 — Briefing Content Structure (Unit)", () => {
 
 describe("Phase 7 — Failure Isolation Regression", () => {
   it("D1 tools work regardless of Computer state", () => {
-    expect(getTools("owner", false).length).toBe(35);
-    expect(getTools("owner", true).length).toBe(39);
+    expect(getTools("owner", false).length).toBe(49);
+    expect(getTools("owner", true).length).toBe(53);
   });
 
   it("Computer disabled still allows D1 operations", () => {

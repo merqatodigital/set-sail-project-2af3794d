@@ -1167,7 +1167,9 @@ export class TallaAgent extends Agent<Env, TallaAgentState> {
                 toolResult = { success: true, data: { status: "pending_approval", workflowId, actionName: tc.name, message: "This action requires owner approval. It has been queued and will execute once an owner approves it." } };
               }
             } else {
-              toolResult = await audit(tc.name, () => executeTool(tc.name, args, toolCtx));
+              toolResult = await audit(tc.name, () =>
+                executeTool(tc.name, args, toolCtx, this.computerEnabled),
+              );
             }
           }
 
@@ -1424,7 +1426,9 @@ export class TallaAgent extends Agent<Env, TallaAgentState> {
           }
           toolResult = await audit(tc.name, () => this.executeComputerTool(tc.name, args, toolCtx));
         } else {
-          toolResult = await audit(tc.name, () => executeTool(tc.name, args, toolCtx));
+          toolResult = await audit(tc.name, () =>
+            executeTool(tc.name, args, toolCtx, this.computerEnabled),
+          );
         }
 
         const toolMsg: ConversationMessage = {

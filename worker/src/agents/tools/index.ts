@@ -39,6 +39,22 @@ import { sendGuestEmailTool } from "./emailTools.js";
 import { browserInspectPageTool, browserReadPageTool } from "./browserTools.js";
 import { searchResortKnowledgeTool } from "./aiSearchTools.js";
 import { sandboxWriteFileTool, sandboxReadFileTool, sandboxListFilesTool, sandboxRunAnalysisTool } from "./sandboxTools.js";
+import {
+  listStaffTool,
+  getPayrollSnapshotTool,
+  runPayrollTool,
+  markPayRecordPaidTool,
+  logPaymentTool,
+  listPaymentsTool,
+  listBookingsTool,
+  listPendingRequestsTool,
+  listMotorbikesTool,
+  confirmTourTool,
+  confirmRentalTool,
+  updateMotorbikeStatusTool,
+  confirmBookingByIdTool,
+  listUnpaidPayRecordsTool,
+} from "./staffTools.js";
 
 // Computer tools (Phase 6)
 import { computerTools } from "../../computer/tools.js";
@@ -66,6 +82,7 @@ export function getTools(role: string | null, computerEnabled = false): TallaToo
     getGuestFolioTool,
     checkRoomAvailabilityTool,
     getGuestStayStateTool,
+    listMotorbikesTool,
 
     // Write tools — available to authenticated users
     createGuestRequestTool,
@@ -79,7 +96,7 @@ export function getTools(role: string | null, computerEnabled = false): TallaToo
     sendGuestEmailTool,
   ];
 
-  // Owner-only tools
+  // Owner-only tools — full admin surface (bookings, tours, rentals, staff, payroll)
   if (isOwner) {
     tools.push(getTodayOperationsTool);
     tools.push(getResortOperationsTool);
@@ -90,6 +107,19 @@ export function getTools(role: string | null, computerEnabled = false): TallaToo
     tools.push(checkInGuestTool);
     tools.push(checkOutGuestTool);
     tools.push(confirmBookingTool);
+    tools.push(confirmBookingByIdTool);
+    tools.push(confirmTourTool);
+    tools.push(confirmRentalTool);
+    tools.push(listBookingsTool);
+    tools.push(listPendingRequestsTool);
+    tools.push(updateMotorbikeStatusTool);
+    tools.push(listStaffTool);
+    tools.push(getPayrollSnapshotTool);
+    tools.push(listUnpaidPayRecordsTool);
+    tools.push(runPayrollTool);
+    tools.push(markPayRecordPaidTool);
+    tools.push(logPaymentTool);
+    tools.push(listPaymentsTool);
     tools.push(sandboxWriteFileTool);
     tools.push(sandboxReadFileTool);
     tools.push(sandboxListFilesTool);
@@ -128,8 +158,11 @@ export async function executeTool(
   name: string,
   args: Record<string, unknown>,
   ctx: ToolContext,
+  computerEnabled = false,
 ): Promise<ToolResult> {
-  const tools = getTools(ctx.role);
+  // Must pass computerEnabled so owner Computer tools resolve the same way
+  // the LLM tool list was built — previously this always dropped them.
+  const tools = getTools(ctx.role, computerEnabled);
   const tool = tools.find((t) => t.name === name);
   if (!tool) {
     return { success: false, error: `Unknown tool: ${name}` };

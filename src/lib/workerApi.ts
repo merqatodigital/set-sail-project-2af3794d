@@ -540,4 +540,97 @@ export const api = {
       return apiFetch<{ wins: TalaWin[] }>(`/api/talla/wins${qs ? `?${qs}` : ""}`);
     },
   },
+
+  // ---- Owner Ops (staff / payroll / bookings / rentals) ----
+  // Same Supabase tables Admin managers use; agent tools share this surface.
+  ops: {
+    snapshot: () =>
+      apiFetch<{
+        bookings: unknown[];
+        pendingRequests: unknown[];
+        staff: unknown[];
+        payroll: {
+          activeStaff: number;
+          unpaidCount: number;
+          unpaidTotal: number;
+          unpaid: unknown[];
+        };
+        payments: unknown[];
+        motorbikes: unknown[];
+        resort: unknown;
+      }>("/api/ops/snapshot"),
+    staff: (activeOnly?: boolean) =>
+      apiFetch<{ staff: unknown[] }>(
+        `/api/ops/staff${activeOnly ? "?active=true" : ""}`,
+      ),
+    shifts: (filters?: { staffId?: string; from?: string; to?: string }) => {
+      const params = new URLSearchParams();
+      if (filters?.staffId) params.set("staffId", filters.staffId);
+      if (filters?.from) params.set("from", filters.from);
+      if (filters?.to) params.set("to", filters.to);
+      const qs = params.toString();
+      return apiFetch<{ shifts: unknown[] }>(`/api/ops/shifts${qs ? `?${qs}` : ""}`);
+    },
+    payroll: (unpaidOnly?: boolean) =>
+      apiFetch<{ records: unknown[]; snapshot: unknown }>(
+        `/api/ops/payroll${unpaidOnly ? "?unpaid=true" : ""}`,
+      ),
+    runPayroll: (periodStart: string, periodEnd: string) =>
+      apiFetch<{ result: unknown }>("/api/ops/payroll/run", {
+        method: "POST",
+        body: { periodStart, periodEnd },
+      }),
+    markPayRecordPaid: (payRecordId: string, method: string) =>
+      apiFetch<{ result: unknown }>("/api/ops/payroll/mark-paid", {
+        method: "POST",
+        body: { payRecordId, method },
+      }),
+    payments: (filters?: { direction?: "in" | "out"; limit?: number }) => {
+      const params = new URLSearchParams();
+      if (filters?.direction) params.set("direction", filters.direction);
+      if (filters?.limit) params.set("limit", String(filters.limit));
+      const qs = params.toString();
+      return apiFetch<{ payments: unknown[] }>(`/api/ops/payments${qs ? `?${qs}` : ""}`);
+    },
+    logPayment: (data: {
+      direction: "in" | "out";
+      category: string;
+      amount: number;
+      method: string;
+      description: string;
+      relatedId?: string;
+    }) => apiFetch<{ result: unknown }>("/api/ops/payments", { method: "POST", body: data }),
+    bookings: (filters?: { status?: string; limit?: number }) => {
+      const params = new URLSearchParams();
+      if (filters?.status) params.set("status", filters.status);
+      if (filters?.limit) params.set("limit", String(filters.limit));
+      const qs = params.toString();
+      return apiFetch<{ bookings: unknown[] }>(`/api/ops/bookings${qs ? `?${qs}` : ""}`);
+    },
+    pending: () => apiFetch<{ pending: unknown[] }>("/api/ops/pending"),
+    confirmBooking: (reference: string) =>
+      apiFetch<{ result: unknown }>("/api/ops/confirm/booking", {
+        method: "POST",
+        body: { reference },
+      }),
+    confirmTour: (data: { reference?: string; requestId?: string }) =>
+      apiFetch<{ result: unknown }>("/api/ops/confirm/tour", { method: "POST", body: data }),
+    confirmRental: (data: { reference?: string; requestId?: string }) =>
+      apiFetch<{ result: unknown }>("/api/ops/confirm/rental", {
+        method: "POST",
+        body: data,
+      }),
+    motorbikes: (availableOnly?: boolean) =>
+      apiFetch<{ motorbikes: unknown[] }>(
+        `/api/ops/motorbikes${availableOnly ? "?available=true" : ""}`,
+      ),
+    setMotorbikeStatus: (
+      bikeName: string,
+      status: "available" | "rented" | "maintenance",
+    ) =>
+      apiFetch<{ result: unknown }>("/api/ops/motorbikes/status", {
+        method: "PATCH",
+        body: { bikeName, status },
+      }),
+  },
 };
