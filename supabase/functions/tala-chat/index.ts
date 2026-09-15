@@ -251,7 +251,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   }
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405, req);
 
-  const openRouterApiKey = Deno.env.get("OPENROUTER_API_KEY");
+  const openRouterApiKey = Deno.env.get("OPENROUTER_API_KEY") ?? Deno.env.get("openrouter_api_key") ?? Deno.env.get("OPENROUTER_API_KEY".toLowerCase());
   if (!openRouterApiKey) {
     return json(
       { error: "TALA is not configured yet: set the OPENROUTER_API_KEY secret in Supabase." },
