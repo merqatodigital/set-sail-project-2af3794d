@@ -139,7 +139,15 @@ export async function talaChatStream(
   input: TalaChatInput,
   onDelta: (text: string) => void,
 ): Promise<TalaChatResult> {
-  const base = talaWorkerBase();
+  let base: string;
+  try {
+    base = talaWorkerBase();
+  } catch {
+    // No worker configured — use Supabase fallback directly (no streaming, but answers)
+    const res = await talaBackendFallback(input);
+    if (res.content) onDelta(res.content);
+    return res;
+  }
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "text/event-stream",
