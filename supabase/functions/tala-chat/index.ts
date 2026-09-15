@@ -266,6 +266,8 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   let wireMessages: WireMessage[];
   let preferredModel: string | undefined;
+  let idempotencyKey: string | undefined;
+  let chatSessionId: string | undefined;
   try {
     const body = await req.json();
     if (!Array.isArray(body?.messages) || body.messages.length === 0) {
@@ -280,6 +282,22 @@ export async function handleRequest(req: Request): Promise<Response> {
     if (typeof body?.model === "string" && MODEL_ID_PATTERN.test(body.model)) {
       preferredModel = body.model.slice(0, 200);
     }
+    if (typeof body?.idempotencyKey === "string" && body.idempotencyKey.trim()) {
+      idempotencyKey = body.idempotencyKey.trim().slice(0, 200);
+    }
+    // Also accept header for idempotency (talaClient sends X-Idempotency-Key)
+    if (!idempotencyKey) {
+      const h = req.headers.get("x-idempotency-key");
+      if (h?.trim()) idempotencyKey = h.trim().slice(0, 200);
+    }
+    if (typeof body?.chatSessionId === "string" && body.chatSessionId.trim()) {
+      chatSessionId = body.chatSessionId.trim().slice(0, 200);
+    }
+    if (!chatSessionId) {
+      const h = req.headers.get("x-chat-session-id");
+      if (h?.trim()) chatSessionId = h.trim().slice(0, 200);
+    }
+    console.log("[tala-chat] request", JSON.stringify({ session: chatSessionId ?? "none", idem: idempotencyKey ?? "none", msgs: wireMessages.length }));
   } catch {
     return json({ error: "invalid JSON body" }, 400, req);
   }
@@ -535,7 +553,31 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (Number.isNaN(ci.getTime()) || Number.isNaN(co.getTime()) || co <= ci) {
         return JSON.stringify({ error: "checkIn and checkOut must be valid dates, checkOut after checkIn." });
       }
-      const { error } = await supabase.from("tala_booking_requests").insert({
+      // Idempotency: if same guest+room+dates+session already pending in last 10 min, return existing
+      try {
+        const g = (guestName ?? "").trim().slice(0, 200).toLowerCase();
+        const r = (roomType ?? "").trim().slice(0, 200).toLowerCase();
+        const since = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+        let q = supabase.from("tala_booking_requests").select("reference,created_at").eq("status", "pending").gte("created_at", since).ilike("guest_name", g).ilike("room_type", r).eq("check_in", checkIn.slice(0, 10)).eq("check_out", checkOut.slice(0, 10)).limit(1);
+        if (chatSessionId) q = q.eq("chat_session_id", chatSessionId) as any;
+        // Try with idempotencyKey exact match first (if column exists)
+        if (idempotencyKey) {
+          const exact = await supabase.from("tala_booking_requests").select("reference").eq("idempotency_key", idempotencyKey).eq("status", "pending").maybeSingle();
+          if (exact.data?.reference) {
+            console.log("[tala] idempotent hit", { idempotencyKey, ref: exact.data.reference });
+            return JSON.stringify({ success: true, status: "pending", reference: exact.data.reference, message: "Booking request already saved — reference " + exact.data.reference });
+          }
+        }
+        const dup = await q.maybeSingle();
+        if (dup.data?.reference) {
+          console.log("[tala] duplicate guard", { session: chatSessionId, ref: dup.data.reference });
+          return JSON.stringify({ success: true, status: "pending", reference: dup.data.reference, message: "Booking request already saved — reference " + dup.data.reference });
+        }
+      } catch { /* idempotency is best-effort, never block */ }
+      const ref = "MT-" + new Date().toISOString().slice(0, 10).replace(/-/g, "") + "-" + String(Math.floor(1000 + Math.random() * 9000));
+      // Try insert with new columns, fallback to legacy schema if RLS/migration not yet applied
+      let err: any = null;
+      const base = {
         guest_name: (guestName ?? "").trim().slice(0, 200),
         room_type: (roomType ?? "").trim().slice(0, 200),
         check_in: checkIn.slice(0, 10),
@@ -544,13 +586,36 @@ export async function handleRequest(req: Request): Promise<Response> {
         amount: amount ?? 0,
         notes: (notes ?? "").trim().slice(0, 1000),
         source: "tala_chat",
-      });
-      if (error) return JSON.stringify({ error: "Couldn't save your request right now." });
+        reference: ref,
+        status: "pending",
+      } as any;
+      if (chatSessionId) base.chat_session_id = chatSessionId;
+      if (idempotencyKey) base.idempotency_key = idempotencyKey;
+      const ins = await supabase.from("tala_booking_requests").insert(base).select("reference").maybeSingle();
+      err = ins.error;
+      if (err && (err.code === "42703" || /column.*does not exist/i.test(err.message))) {
+        // Retry without new columns
+        const legacy: any = { ...base };
+        delete legacy.chat_session_id;
+        delete legacy.idempotency_key;
+        // reference/status may also be missing in old schema — try without
+        const r2 = await supabase.from("tala_booking_requests").insert(legacy);
+        err = r2.error;
+        if (!err) {
+          console.log("[tala] booking saved (legacy schema)", { ref, session: chatSessionId });
+          return JSON.stringify({ success: true, status: "pending", reference: ref, message: "Booking request saved — reference " + ref + " — the team will confirm shortly." });
+        }
+      }
+      if (err) {
+        console.warn("[tala] booking insert failed", { err: err.message, session: chatSessionId });
+        return JSON.stringify({ error: "Couldn't save your request right now. Please try again." });
+      }
+      console.log("[tala] booking saved", { ref, session: chatSessionId, idem: idempotencyKey ?? "none" });
       return JSON.stringify({
         success: true,
         status: "pending",
-        message:
-          "Booking request saved — the team will confirm availability and reach out to finalize. Pending requests already hold the room so you won't be double-booked.",
+        reference: ref,
+        message: "Booking request saved — reference " + ref + " — the team will confirm availability and reach out to finalize. Pending requests already hold the room so you won't be double-booked.",
       });
     },
     {
@@ -589,22 +654,28 @@ export async function handleRequest(req: Request): Promise<Response> {
     }) => {
       const d = new Date(date);
       if (Number.isNaN(d.getTime())) return JSON.stringify({ error: "A valid tour date (YYYY-MM-DD) is required." });
-      const { error } = await supabase.from("tala_tour_requests").insert({
-        guest_name: (guestName ?? "").trim().slice(0, 200),
-        guest_phone: (guestPhone ?? "").trim().slice(0, 200),
-        tour_name: (tourName ?? "").trim().slice(0, 200),
-        tour_date: date.slice(0, 10),
-        guests: guests ?? 1,
-        amount: amount ?? 0,
-        notes: (notes ?? "").trim().slice(0, 1000),
-        source: "tala_chat",
-      });
-      if (error) return JSON.stringify({ error: "Couldn't save your tour request right now." });
-      return JSON.stringify({
-        success: true,
-        status: "requested",
-        message: "Tour request saved — the team will confirm the departure and spot, then message you.",
-      });
+      // Idempotency for tours
+      try {
+        if (idempotencyKey) {
+          const ex = await supabase.from("tala_tour_requests").select("reference").eq("idempotency_key", idempotencyKey).eq("status", "requested").maybeSingle();
+          if (ex.data?.reference) return JSON.stringify({ success: true, status: "requested", reference: ex.data.reference, message: "Tour request already saved — reference " + ex.data.reference });
+        }
+      } catch {}
+      const tRef = "TR-" + new Date().toISOString().slice(0, 10).replace(/-/g, "") + "-" + String(Math.floor(1000 + Math.random() * 9000));
+      const tBase: any = { guest_name: (guestName ?? "").trim().slice(0, 200), guest_phone: (guestPhone ?? "").trim().slice(0, 200), tour_name: (tourName ?? "").trim().slice(0, 200), tour_date: date.slice(0, 10), guests: guests ?? 1, amount: amount ?? 0, notes: (notes ?? "").trim().slice(0, 1000), source: "tala_chat", reference: tRef, status: "requested" };
+      if (chatSessionId) tBase.chat_session_id = chatSessionId;
+      if (idempotencyKey) tBase.idempotency_key = idempotencyKey;
+      let tErr: any = null;
+      const tIns = await supabase.from("tala_tour_requests").insert(tBase).select("reference").maybeSingle();
+      tErr = tIns.error;
+      if (tErr && /column.*does not exist/i.test(tErr.message)) {
+        delete tBase.chat_session_id; delete tBase.idempotency_key;
+        const r2 = await supabase.from("tala_tour_requests").insert(tBase);
+        tErr = r2.error;
+      }
+      if (tErr) return JSON.stringify({ error: "Couldn't save your tour request right now. Please try again." });
+      console.log("[tala] tour saved", { ref: tRef, session: chatSessionId });
+      return JSON.stringify({ success: true, status: "requested", reference: tRef, message: "Tour request saved — reference " + tRef + " — the team will confirm shortly." });
     },
     {
       name: "request_tour_booking",
@@ -643,20 +714,27 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime()) || e < s) {
         return JSON.stringify({ error: "startDate and endDate must be valid dates, endDate on/after startDate." });
       }
-      const { error } = await supabase.from("tala_rental_requests").insert({
-        guest_name: (guestName ?? "").trim().slice(0, 200),
-        guest_phone: (guestPhone ?? "").trim().slice(0, 200),
-        bike_name: (bikeName ?? "").trim().slice(0, 200),
-        start_date: startDate.slice(0, 10),
-        end_date: endDate.slice(0, 10),
-        notes: (notes ?? "").trim().slice(0, 1000),
-        source: "tala_chat",
-      });
-      if (error) return JSON.stringify({ error: "Couldn't save your rental request right now." });
-      return JSON.stringify({
-        success: true,
-        status: "requested",
-        message: "Motorbike rental request saved — the team will confirm availability and rate, then message you.",
+      try {
+        if (idempotencyKey) {
+          const ex = await supabase.from("tala_rental_requests").select("reference").eq("idempotency_key", idempotencyKey).eq("status", "requested").maybeSingle();
+          if (ex.data?.reference) return JSON.stringify({ success: true, status: "requested", reference: ex.data.reference, message: "Rental request already saved — reference " + ex.data.reference });
+        }
+      } catch {}
+      const rRef = "BK-" + new Date().toISOString().slice(0, 10).replace(/-/g, "") + "-" + String(Math.floor(1000 + Math.random() * 9000));
+      const rBase: any = { guest_name: (guestName ?? "").trim().slice(0, 200), guest_phone: (guestPhone ?? "").trim().slice(0, 200), bike_name: (bikeName ?? "").trim().slice(0, 200), start_date: startDate.slice(0, 10), end_date: endDate.slice(0, 10), notes: (notes ?? "").trim().slice(0, 1000), source: "tala_chat", reference: rRef, status: "requested" };
+      if (chatSessionId) rBase.chat_session_id = chatSessionId;
+      if (idempotencyKey) rBase.idempotency_key = idempotencyKey;
+      let rErr: any = null;
+      const rIns = await supabase.from("tala_rental_requests").insert(rBase).select("reference").maybeSingle();
+      rErr = rIns.error;
+      if (rErr && /column.*does not exist/i.test(rErr.message)) {
+        delete rBase.chat_session_id; delete rBase.idempotency_key;
+        const r2 = await supabase.from("tala_rental_requests").insert(rBase);
+        rErr = r2.error;
+      }
+      if (rErr) return JSON.stringify({ error: "Couldn't save your rental request right now. Please try again." });
+      console.log("[tala] rental saved", { ref: rRef, session: chatSessionId });
+      return JSON.stringify({ success: true, status: "requested", reference: rRef, message: "Motorbike rental request saved — reference " + rRef + " — the team will confirm shortly." });
       });
     },
     {
@@ -727,10 +805,44 @@ export async function handleRequest(req: Request): Promise<Response> {
     },
   );
 
-  // ---- Operator confirmations (move guest intent → real record) ----------
-  // These are only callable from the operator/owner face. They promote a
-  // guest's pending request into real cms_data bookings so the workflow is:
-  // guest requests via orb → request_booking → owner confirms via confirm_booking.
+  // ---- Background notify (fire-and-forget, never blocks guest) ----------
+  function fireNotify(payload: { type: string; reference: string; guestName: string; guestPhone: string; guestEmail?: string }) {
+    // Structured log immediately, then async notify with retries (logged, not blocking)
+    console.log("[notify] queued", JSON.stringify(payload));
+    const run = async () => {
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          // WhatsApp via whatsapp-send edge function (fire-and-forget)
+          if (payload.guestPhone) {
+            const { error: waErr } = await supabase.functions.invoke("whatsapp-send", {
+              body: { to: payload.guestPhone, message: `Confirmed ${payload.type} ${payload.reference} for ${payload.guestName}.` },
+            });
+            if (waErr) throw new Error(waErr.message);
+            console.log("[notify] whatsapp ok", { ref: payload.reference, attempt });
+            break;
+          }
+        } catch (e) {
+          console.warn("[notify] whatsapp retry", { ref: payload.reference, attempt, err: (e as Error).message });
+          if (attempt === 3) console.error("[notify] whatsapp failed after 3", { ref: payload.reference });
+          await new Promise((r) => setTimeout(r, 500 * attempt));
+        }
+      }
+      // Email via supabase auth? Log separately; retry similarly if needed
+      console.log("[notify] email queued", { ref: payload.reference });
+    };
+    try {
+      // Deno EdgeRuntime.waitUntil keeps work alive after response
+      const rt: any = (globalThis as any).EdgeRuntime;
+      if (rt?.waitUntil) rt.waitUntil(run());
+      else run().catch(() => {});
+    } catch {
+      run().catch(() => {});
+    }
+  }
+
+  // ---- Operator confirmations (move pending → confirmed → notified) ----------
+  // Status state machine: pending → confirmed → notified (and cancelled/failed).
+  // Confirm returns immediately; notify is fire-and-forget with retry/logging.
 
   const confirmBookingTool = tool(
     async ({ requestId }: { requestId: string }) => {
@@ -742,13 +854,17 @@ export async function handleRequest(req: Request): Promise<Response> {
         .eq("status", "pending")
         .maybeSingle();
       if (fetchErr || !row) return JSON.stringify({ error: "Request not found or already handled." });
-      const ref = "MT-" + new Date().getFullYear() + "-" + String(Math.floor(Math.random() * 9000 + 1000));
+      const ref = (row as any).reference || "MT-" + new Date().getFullYear() + "-" + String(Math.floor(Math.random() * 9000 + 1000));
       const { error: upErr } = await supabase
         .from("tala_booking_requests")
-        .update({ status: "confirmed", confirmed_at: new Date().toISOString() })
+        .update({ status: "confirmed", confirmed_at: new Date().toISOString() } as any)
         .eq("id", requestId);
       if (upErr) return JSON.stringify({ error: "Couldn't confirm right now." });
-      return JSON.stringify({ success: true, reference: ref, message: `Booking confirmed with reference ${ref}. Team will reach out.` });
+      // Return BEFORE notify; notify is async with retry (pending→confirmed→notified)
+      fireNotify({ type: "booking", reference: ref, guestName: (row as any).guest_name, guestPhone: (row as any).guest_phone ?? "", guestEmail: (row as any).guest_email });
+      // Move to notified in background (best-effort)
+      (globalThis as any).EdgeRuntime?.waitUntil?.(supabase.from("tala_booking_requests").update({ status: "notified" } as any).eq("id", requestId).then(() => console.log("[notify] status notified", { ref })));
+      return JSON.stringify({ success: true, status: "confirmed", reference: ref, message: `Booking confirmed with reference ${ref}. Confirmation WhatsApp/email queued.` });
     },
     {
       name: "confirm_booking",

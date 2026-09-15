@@ -49,6 +49,8 @@ async function askCloudflareAgent(
     owner?: boolean;
     signal?: AbortSignal;
     onDelta?: (delta: string) => void;
+    idempotencyKey?: string;
+    chatSessionId?: string;
   },
 ): Promise<AssistantReply> {
   if (!text.trim()) throw new Error("Empty message.");
@@ -59,6 +61,7 @@ async function askCloudflareAgent(
     authToken = token || undefined;
     if (ownerId) userId = ownerId;
   }
+  const chatSessionId = opts?.chatSessionId ?? userId;
   const payload = {
     message: text,
     systemPrompt: opts?.systemPrompt,
@@ -67,7 +70,10 @@ async function askCloudflareAgent(
     model: opts?.model,
     authToken,
     signal: opts?.signal,
+    idempotencyKey: opts?.idempotencyKey,
+    chatSessionId,
   };
+  console.debug("[tala] askCloudflareAgent", { session: chatSessionId, idem: opts?.idempotencyKey ?? "none" });
   const result = opts?.onDelta ? await talaChatStream(payload, opts.onDelta) : await talaChat(payload);
   const content = result.content?.trim() || "";
   if (!content) throw new Error("TALA returned an empty reply.");
@@ -81,6 +87,8 @@ export interface RequestDayPassInput {
   day: string;
   guests?: number;
   notes?: string;
+  idempotencyKey?: string;
+  chatSessionId?: string;
 }
 
 export async function requestDayPass(input: RequestDayPassInput, preferredModel?: string): Promise<{ content: string; reference: string | null }> {
@@ -97,7 +105,11 @@ export async function requestDayPass(input: RequestDayPassInput, preferredModel?
     `Check-in ${day}, check-out ${next} (single day pass).`,
     notes ? `Additional requests: ${notes}.` : "",
   ].filter(Boolean).join(" ");
-  const reply = await askCloudflareAgent(text, { model: preferredModel });
+  const reply = await askCloudflareAgent(text, {
+    model: preferredModel,
+    idempotencyKey: input.idempotencyKey,
+    chatSessionId: input.chatSessionId,
+  });
   const match = reply.content?.match(/\bMT-\d{8}-\d{4}\b/);
   return { content: reply.content || "", reference: match ? match[0] : null };
 }
@@ -112,6 +124,8 @@ export interface RequestStayBookingInput {
   checkOut: string;
   guests: number;
   notes?: string;
+  idempotencyKey?: string;
+  chatSessionId?: string;
 }
 
 export async function requestStayBooking(input: RequestStayBookingInput, preferredModel?: string): Promise<{ content: string; reference: string | null }> {
@@ -128,7 +142,11 @@ export async function requestStayBooking(input: RequestStayBookingInput, preferr
     notes ? `Additional requests: ${notes}.` : "",
     `Please create the pending booking request now — do not ask me to repeat any of these details.`,
   ].filter(Boolean).join(" ");
-  const reply = await askCloudflareAgent(text, { model: preferredModel });
+  const reply = await askCloudflareAgent(text, {
+    model: preferredModel,
+    idempotencyKey: input.idempotencyKey,
+    chatSessionId: input.chatSessionId,
+  });
   const match = reply.content?.match(/\bMT-\d{8}-\d{4}\b/);
   return { content: reply.content || "", reference: match ? match[0] : null };
 }

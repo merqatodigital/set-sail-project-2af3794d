@@ -3,7 +3,7 @@ import { Calendar, Loader2, Mail, Phone, Sparkles, User, Users } from "lucide-re
 import type { CmsData } from "@/types/cms";
 import { normalizePhone } from "@/lib/portalRepo";
 import { todayISO, addDays } from "./talaDate";
-import { requestStayBooking } from "./useTalaChat";
+import { getGuestSessionId, requestStayBooking } from "./useTalaChat";
 import type { TalaIntentPayload } from "./talaIntent";
 import { listOffers, type Offer } from "./talaOffers";
 
@@ -106,8 +106,23 @@ export function BookingRequestForm({
 
   const submit = async () => {
     if (!canSubmit || busy) return;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+    if (normalizePhone(countryCode + phone).length < 8) {
+      setError("Please enter a valid WhatsApp/mobile number.");
+      return;
+    }
+    if (new Date(checkOut) <= new Date(checkIn)) {
+      setError("Check-out must be after check-in.");
+      return;
+    }
     setBusy(true);
     setError(null);
+    const chatSessionId = getGuestSessionId();
+    const idempotencyKey = `stay:${chatSessionId}:${effLabel.toLowerCase()}:${checkIn}:${checkOut}:${name.trim().toLowerCase()}`;
+    const timeout = setTimeout(() => console.warn("[BookingForm] timeout", { session: chatSessionId }), 15000);
     try {
       const notes = [
         requests.trim(),
@@ -117,26 +132,36 @@ export function BookingRequestForm({
       ]
         .filter(Boolean)
         .join(" · ");
-      const res = await requestStayBooking({
-        offerLabel: effLabel,
-        offerKind: effKind,
-        guestName: name.trim(),
-        guestEmail: email.trim(),
-        guestPhone: normalizePhone(countryCode + phone),
-        checkIn,
-        checkOut,
-        guests,
-        notes,
-      });
+      const res = await Promise.race([
+        requestStayBooking(
+          {
+            offerLabel: effLabel,
+            offerKind: effKind,
+            guestName: name.trim(),
+            guestEmail: email.trim(),
+            guestPhone: normalizePhone(countryCode + phone),
+            checkIn,
+            checkOut,
+            guests,
+            notes,
+            idempotencyKey,
+            chatSessionId,
+          },
+        ),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("TALA took too long — please tap again.")), 15000)),
+      ]);
       if (!res.reference || !res.content) {
-        throw new Error(
-          res.content || "TALA couldn't save the request — no reference was returned.",
-        );
+        throw new Error(res.content || "TALA couldn't save the request — no reference was returned.");
       }
       if (mounted.current) setDone({ reference: res.reference, content: res.content });
+      console.debug("[BookingForm] done", { reference: res.reference, session: chatSessionId });
     } catch (e) {
-      if (mounted.current) setError(e instanceof Error ? e.message : "Could not reach TALA.");
+      const msg = e instanceof Error ? e.message : "Could not reach TALA.";
+      const plain = /timeout|too long/i.test(msg) ? "TALA is busy — please tap Submit again." : /Failed to send/i.test(msg) ? "We couldn't reach the booking service — please try again." : msg;
+      if (mounted.current) setError(plain);
+      console.warn("[BookingForm] error", { error: msg, session: chatSessionId });
     } finally {
+      clearTimeout(timeout);
       if (mounted.current) setBusy(false);
     }
   };

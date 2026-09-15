@@ -16,7 +16,7 @@ import type { CmsData, MenuCategory } from "@/types/cms";
 import { useCurrency } from "@/context/CurrencyContext";
 import { normalizePhone, createFoodOrder } from "@/lib/portalRepo";
 import { todayISO } from "./talaDate";
-import { requestDayPass } from "./useTalaChat";
+import { getGuestSessionId, requestDayPass } from "./useTalaChat";
 
 const GREEN = "#1F3D2B";
 const GREEN_DARK = "#16301F";
@@ -133,28 +133,49 @@ export function DayPassForm({ cms }: { cms: CmsData }) {
 
   const submit = async () => {
     if (!canSubmit || busy) return;
+    // Client-side field validation — never silent hang
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+    if (normalizePhone(countryCode + phone).length < 8) {
+      setError("Please enter a valid WhatsApp/mobile number.");
+      return;
+    }
     setBusy(true);
     setError(null);
+    // Idempotency: same guest + day + session → same key, prevents double bookings on double-click/retry
+    const chatSessionId = getGuestSessionId();
+    const idempotencyKey = `daypass:${chatSessionId}:${day}:${name.trim().toLowerCase()}:${normalizePhone(countryCode + phone)}`;
+    // Timeout guard — spinner must stop even if network hangs (15s)
+    const timeout = setTimeout(() => {
+      if (mounted.current && busy) {
+        // Will be cleared by catch/finally, but ensure we log
+        console.warn("[DayPassForm] timeout waiting for TALA");
+      }
+    }, 15000);
     try {
       const fullPhone = normalizePhone(countryCode + phone);
       const notesParts: string[] = [];
       if (arrival) notesParts.push(`Arrival around ${arrival}`);
       if (allergies.trim()) notesParts.push(`Allergies/dietary: ${allergies.trim()}`);
       if (requests.trim()) notesParts.push(requests.trim());
-      // NOTE: the food add-on is deliberately NOT embedded here. Food has one
-      // source of truth (tala_food_orders) — it must never hide inside the
-      // booking notes. If the food write fails below, we say so explicitly.
       const notes = notesParts.join(" · ");
 
-      // Day Pass through the worker path FIRST — it is the critical write.
-      const res = await requestDayPass({
-        guestName: name.trim(),
-        guestEmail: email.trim(),
-        guestPhone: fullPhone,
-        day,
-        guests: people,
-        notes,
-      });
+      // Day Pass through the unified pipeline — returns BEFORE WhatsApp/email (fire-and-forget)
+      const res = await Promise.race([
+        requestDayPass({
+          guestName: name.trim(),
+          guestEmail: email.trim(),
+          guestPhone: fullPhone,
+          day,
+          guests: people,
+          notes,
+          idempotencyKey,
+          chatSessionId,
+        }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("TALA took too long — please tap again.")), 15000)),
+      ]);
 
       // Only a returned MT- reference means tala_booking_requests actually
       // got a row. If TALA asked for more details or failed to book, never
@@ -173,6 +194,7 @@ export function DayPassForm({ cms }: { cms: CmsData }) {
       let foodStatus: "none" | "saved" | "failed" = cart.length ? "failed" : "none";
       let foodReference: string | null = null;
       if (cart.length) {
+        const foodIdem = `food:${idempotencyKey}`;
         const saved = await createFoodOrder({
           guest: { name: name.trim(), phone: fullPhone },
           items: cart.map((c) => ({
@@ -185,6 +207,8 @@ export function DayPassForm({ cms }: { cms: CmsData }) {
           total: foodTotal,
           totalCost: foodCostTotal,
           notes: `Serving: ${servingTime}.${foodNotes.trim() ? " " + foodNotes.trim() : ""}`,
+          idempotencyKey: foodIdem,
+          chatSessionId,
         });
         if (saved) {
           foodStatus = "saved";
@@ -195,9 +219,15 @@ export function DayPassForm({ cms }: { cms: CmsData }) {
       }
 
       if (mounted.current) setDone({ reference: res.reference, foodReference, foodStatus });
+      console.debug("[DayPassForm] done", { reference: res.reference, session: chatSessionId });
     } catch (e) {
-      if (mounted.current) setError(e instanceof Error ? e.message : "Could not reach TALA.");
+      const msg = e instanceof Error ? e.message : "Could not reach TALA.";
+      // Plain language mapping
+      const plain = /timeout|too long/i.test(msg) ? "TALA is busy — please tap Request Day Pass again." : /Failed to send/i.test(msg) ? "We couldn't reach the booking service — please try again." : msg;
+      if (mounted.current) setError(plain);
+      console.warn("[DayPassForm] error", { error: msg, session: chatSessionId });
     } finally {
+      clearTimeout(timeout);
       if (mounted.current) setBusy(false);
     }
   };

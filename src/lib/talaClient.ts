@@ -65,6 +65,10 @@ export interface TalaChatInput {
   guestName?: string;
   guestRoom?: string;
   signal?: AbortSignal;
+  /** Idempotency key per chat session + form — prevents duplicate bookings on retry/double-click. */
+  idempotencyKey?: string;
+  /** Chat/session/thread ID attached to every record for backoffice correlation. */
+  chatSessionId?: string;
 }
 
 async function talaBackendFallback(input: TalaChatInput): Promise<TalaChatResult> {
@@ -73,16 +77,32 @@ async function talaBackendFallback(input: TalaChatInput): Promise<TalaChatResult
     input.systemPrompt ? { role: "system", content: input.systemPrompt } : null,
     { role: "user", content: input.message },
   ].filter((message): message is { role: string; content: string } => message !== null);
+  // Structured log: fallback start
+  console.debug("[tala] fallback", { session: input.chatSessionId ?? input.userId, idem: input.idempotencyKey ?? "none" });
   const { data, error } = await supabase.functions.invoke("tala-chat", {
-    body: { messages, model: input.model || undefined },
+    body: {
+      messages,
+      model: input.model || undefined,
+      idempotencyKey: input.idempotencyKey,
+      chatSessionId: input.chatSessionId ?? input.userId,
+    },
   });
-  if (error) throw new Error(error.message || "TALA backend is unavailable.");
+  if (error) {
+    // Map known edge errors to plain language
+    const msg = error.message || "TALA backend is unavailable.";
+    if (/non-2xx/i.test(msg)) throw new Error("TALA had a hiccup — please try again in a moment.");
+    throw new Error(msg);
+  }
   const result = data as { reply?: string; content?: string; error?: string } | null;
-  if (result?.error) throw new Error(result.error);
+  if (result?.error) {
+    // Surface validation errors verbatim; map auth/config to plain language
+    if (/not configured/i.test(result.error)) throw new Error("TALA is warming up — please try again shortly.");
+    throw new Error(result.error);
+  }
   return { content: result?.reply ?? result?.content ?? null };
 }
 
-/** Single POST to the Cloudflare TallaAgent. */
+/** Single POST to the Cloudflare TallaAgent. Returns BEFORE WhatsApp/email. */
 export async function talaChat(input: TalaChatInput): Promise<TalaChatResult> {
   let base: string;
   try {
@@ -94,15 +114,21 @@ export async function talaChat(input: TalaChatInput): Promise<TalaChatResult> {
   if (input.authToken) {
     headers.Authorization = `Bearer ${input.authToken}`;
   } else {
-    // No Supabase session (e.g. admin Guest Login). Forward the dev tenant
-    // header so the Worker's TALA_DEV_MODE bypass grants owner access in staging.
     headers["X-Dev-Tenant"] = TALA_TENANT;
   }
+  // Always enforce a timeout — prevents infinite spinner. Default 15s, caller can override via signal.
+  const timeoutSignal = input.signal ?? AbortSignal.timeout(15000);
+  // Log start
+  console.debug("[tala] chat start", { base, session: input.chatSessionId ?? input.userId, idem: input.idempotencyKey ?? "none" });
   let res: Response;
   try {
     res = await fetch(`${base}/api/talla/chat`, {
       method: "POST",
-      headers,
+      headers: {
+        ...headers,
+        ...(input.idempotencyKey ? { "X-Idempotency-Key": input.idempotencyKey } : {}),
+        ...(input.chatSessionId ? { "X-Chat-Session-Id": input.chatSessionId } : {}),
+      },
       body: JSON.stringify({
         message: input.message,
         tenantId: input.tenantId ?? TALA_TENANT,
@@ -111,20 +137,32 @@ export async function talaChat(input: TalaChatInput): Promise<TalaChatResult> {
         model: input.model || undefined,
         guestName: input.guestName,
         guestRoom: input.guestRoom,
+        idempotencyKey: input.idempotencyKey,
+        chatSessionId: input.chatSessionId ?? input.userId,
       }),
-      signal: input.signal,
+      signal: timeoutSignal,
     });
   } catch (error) {
-    if ((error as Error)?.name === "AbortError") throw error;
+    if ((error as Error)?.name === "AbortError") {
+      console.warn("[tala] chat aborted/timeout", { session: input.chatSessionId ?? input.userId });
+      throw new Error("TALA took too long — please try again.");
+    }
+    console.warn("[tala] chat fetch failed, fallback", { err: (error as Error).message });
     return talaBackendFallback(input);
   }
   const data = (await res.json().catch(() => null)) as
     | { content?: string; error?: string; model?: string; usage?: unknown; timing?: Record<string, number | string> }
     | null;
   if (!res.ok) {
-    if (res.status >= 500) return talaBackendFallback(input);
-    throw new Error(data?.error || `TALA service error (HTTP ${res.status})`);
+    if (res.status >= 500) {
+      console.warn("[tala] worker 500, fallback", { status: res.status });
+      return talaBackendFallback(input);
+    }
+    // 4xx validation — surface as field-level error in chat
+    const plain = data?.error || `Please check your details (HTTP ${res.status}).`;
+    throw new Error(plain);
   }
+  console.debug("[tala] chat ok", { session: input.chatSessionId ?? input.userId });
   return { content: data?.content ?? null, model: data?.model, usage: data?.usage, timing: data?.timing };
 }
 
@@ -143,11 +181,12 @@ export async function talaChatStream(
   try {
     base = talaWorkerBase();
   } catch {
-    // No worker configured — use Supabase fallback directly (no streaming, but answers)
     const res = await talaBackendFallback(input);
     if (res.content) onDelta(res.content);
     return res;
   }
+  // Timeout for streaming: 20s total
+  const timeoutSignal = input.signal ?? AbortSignal.timeout(20000);
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "text/event-stream",
@@ -157,7 +196,11 @@ export async function talaChatStream(
   try {
     res = await fetch(`${base}/api/talla/chat`, {
       method: "POST",
-      headers,
+      headers: {
+        ...headers,
+        ...(input.idempotencyKey ? { "X-Idempotency-Key": input.idempotencyKey } : {}),
+        ...(input.chatSessionId ? { "X-Chat-Session-Id": input.chatSessionId } : {}),
+      },
       body: JSON.stringify({
         message: input.message,
         tenantId: input.tenantId ?? TALA_TENANT,
@@ -167,8 +210,10 @@ export async function talaChatStream(
         guestName: input.guestName,
         guestRoom: input.guestRoom,
         stream: true,
+        idempotencyKey: input.idempotencyKey,
+        chatSessionId: input.chatSessionId ?? input.userId,
       }),
-      signal: input.signal,
+      signal: timeoutSignal,
     });
   } catch (e) {
     // A user cancel must stay a cancel; anything else (network/CORS on a Worker

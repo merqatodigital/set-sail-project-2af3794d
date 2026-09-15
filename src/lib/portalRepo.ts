@@ -206,12 +206,20 @@ export interface CreateTourRequestInput {
   guests: number;
   amount: number; // authoritative = tour.price * guests
   notes?: string;
+  idempotencyKey?: string;
+  chatSessionId?: string;
 }
 
 export async function createTourRequest(input: CreateTourRequestInput): Promise<PortalTourRequestRow | null> {
   if (!connected()) return null;
+  if (input.idempotencyKey) {
+    try {
+      const { data } = await db().from("tala_tour_requests").select("reference").eq("idempotency_key", input.idempotencyKey).eq("status", "requested").maybeSingle();
+      if ((data as any)?.reference) return { id: "", reference: (data as any).reference, guest_name: input.guest.name.slice(0, 200), guest_phone: normalizePhone(input.guest.phone).slice(0, 200), tour_name: input.tourName.slice(0, 200), tour_date: input.tourDate.slice(0, 10), guests: input.guests, amount: input.amount, notes: (input.notes || "").trim().slice(0, 1000), status: "requested", source: "portal", confirmed_at: null, paid_amount: 0, paid_at: null, created_at: new Date().toISOString() };
+    } catch {}
+  }
   const reference = generateReference("TR");
-  const payload = {
+  const payload: any = {
     reference,
     guest_name: input.guest.name.slice(0, 200),
     guest_phone: normalizePhone(input.guest.phone).slice(0, 200),
@@ -223,10 +231,17 @@ export async function createTourRequest(input: CreateTourRequestInput): Promise<
     status: "requested",
     source: "portal",
   };
-  const { error } = await db()
-    .from("tala_tour_requests")
-    .insert(payload);
-  if (error) return null;
+  if (input.idempotencyKey) payload.idempotency_key = input.idempotencyKey;
+  if (input.chatSessionId) payload.chat_session_id = input.chatSessionId;
+  let err: any = null;
+  const { error } = await db().from("tala_tour_requests").insert(payload);
+  err = error;
+  if (err && /column.*does not exist/i.test(err.message)) {
+    delete payload.idempotency_key; delete payload.chat_session_id;
+    const r2 = await db().from("tala_tour_requests").insert(payload);
+    err = r2.error;
+  }
+  if (err) return null;
   // NOTE: anon role is INSERT-only (RLS) — PostgREST's RETURNING is filtered,
   // so build the returned row from our own payload instead of .select().
   return {
@@ -323,12 +338,20 @@ export interface CreateRentalRequestInput {
   days: number;
   amount: number; // authoritative = bike.dailyRate * days
   notes?: string;
+  idempotencyKey?: string;
+  chatSessionId?: string;
 }
 
 export async function createRentalRequest(input: CreateRentalRequestInput): Promise<PortalRentalRequestRow | null> {
   if (!connected()) return null;
+  if (input.idempotencyKey) {
+    try {
+      const { data } = await db().from("tala_rental_requests").select("reference").eq("idempotency_key", input.idempotencyKey).eq("status", "requested").maybeSingle();
+      if ((data as any)?.reference) return { id: "", reference: (data as any).reference, guest_name: input.guest.name.slice(0, 200), guest_phone: normalizePhone(input.guest.phone).slice(0, 200), bike_name: input.bikeName.slice(0, 200), start_date: input.startDate.slice(0, 10), end_date: input.endDate.slice(0, 10), days: input.days, amount: input.amount, notes: (input.notes || "").trim().slice(0, 1000), status: "requested", source: "portal", confirmed_at: null, paid_amount: 0, paid_at: null, created_at: new Date().toISOString() };
+    } catch {}
+  }
   const reference = generateReference("BK");
-  const payload = {
+  const payload: any = {
     reference,
     guest_name: input.guest.name.slice(0, 200),
     guest_phone: normalizePhone(input.guest.phone).slice(0, 200),
@@ -341,10 +364,17 @@ export async function createRentalRequest(input: CreateRentalRequestInput): Prom
     status: "requested",
     source: "portal",
   };
-  const { error } = await db()
-    .from("tala_rental_requests")
-    .insert(payload);
-  if (error) return null;
+  if (input.idempotencyKey) payload.idempotency_key = input.idempotencyKey;
+  if (input.chatSessionId) payload.chat_session_id = input.chatSessionId;
+  let err: any = null;
+  const { error } = await db().from("tala_rental_requests").insert(payload);
+  err = error;
+  if (err && /column.*does not exist/i.test(err.message)) {
+    delete payload.idempotency_key; delete payload.chat_session_id;
+    const r2 = await db().from("tala_rental_requests").insert(payload);
+    err = r2.error;
+  }
+  if (err) return null;
   // anon is INSERT-only under RLS — build the returned row locally.
   return {
     id: "",
@@ -402,12 +432,20 @@ export interface CreateBookingRequestInput {
   guests: number;
   amount: number; // authoritative nightly rate * nights
   notes?: string;
+  idempotencyKey?: string;
+  chatSessionId?: string;
 }
 
 export async function createBookingRequest(input: CreateBookingRequestInput): Promise<PortalBookingRequestRow | null> {
   if (!connected()) return null;
+  if (input.idempotencyKey) {
+    try {
+      const { data } = await db().from("tala_booking_requests").select("reference").eq("idempotency_key", input.idempotencyKey).eq("status", "pending").maybeSingle();
+      if ((data as any)?.reference) return { id: "", reference: (data as any).reference, guest_name: input.guest.name.slice(0, 200), guest_phone: normalizePhone(input.guest.phone).slice(0, 200), room_type: input.roomType.slice(0, 200), check_in: input.checkIn.slice(0, 10), check_out: input.checkOut.slice(0, 10), guests: input.guests, amount: input.amount, notes: (input.notes || "").trim().slice(0, 1000), status: "pending", source: "portal", confirmed_at: null, paid_amount: 0, paid_at: null, created_at: new Date().toISOString() };
+    } catch {}
+  }
   const reference = generateReference("MT");
-  const payload = {
+  const payload: any = {
     reference,
     guest_name: input.guest.name.slice(0, 200),
     guest_phone: normalizePhone(input.guest.phone).slice(0, 200),
@@ -420,10 +458,17 @@ export async function createBookingRequest(input: CreateBookingRequestInput): Pr
     status: "pending",
     source: "portal",
   };
-  const { error } = await db()
-    .from("tala_booking_requests")
-    .insert(payload);
-  if (error) return null;
+  if (input.idempotencyKey) payload.idempotency_key = input.idempotencyKey;
+  if (input.chatSessionId) payload.chat_session_id = input.chatSessionId;
+  let err: any = null;
+  const { error } = await db().from("tala_booking_requests").insert(payload);
+  err = error;
+  if (err && /column.*does not exist/i.test(err.message)) {
+    delete payload.idempotency_key; delete payload.chat_session_id;
+    const r2 = await db().from("tala_booking_requests").insert(payload);
+    err = r2.error;
+  }
+  if (err) return null;
   // anon is INSERT-only under RLS — build the returned row locally.
   return {
     id: "",
@@ -479,12 +524,24 @@ export interface CreateFoodOrderInput {
   total: number; // authoritative sum of item.price * quantity
   totalCost: number;
   notes?: string;
+  idempotencyKey?: string;
+  chatSessionId?: string;
 }
 
 export async function createFoodOrder(input: CreateFoodOrderInput): Promise<PortalFoodOrderRow | null> {
   if (!connected()) return null;
+  // Idempotency: if same idempotencyKey exists, return existing (prevents double food orders on retry)
+  if (input.idempotencyKey) {
+    try {
+      const { data } = await db().from("tala_food_orders").select("reference").eq("idempotency_key", input.idempotencyKey).eq("status", "pending").maybeSingle();
+      if ((data as any)?.reference) {
+        console.debug("[portal] food idempotent hit", { ref: (data as any).reference });
+        return { id: "", reference: (data as any).reference, guest_name: input.guest.name.slice(0, 200), guest_phone: normalizePhone(input.guest.phone).slice(0, 200), items: input.items, total: input.total, total_cost: input.totalCost, notes: (input.notes || "").trim().slice(0, 1000), status: "pending", source: "portal", created_at: new Date().toISOString(), confirmed_at: null, preparing_at: null, ready_at: null, delivered_at: null, cancelled_at: null, paid_amount: 0, paid_at: null };
+      }
+    } catch {}
+  }
   const reference = generateReference("FO");
-  const payload = {
+  const payload: any = {
     reference,
     guest_name: input.guest.name.slice(0, 200),
     guest_phone: normalizePhone(input.guest.phone).slice(0, 200),
@@ -495,10 +552,20 @@ export async function createFoodOrder(input: CreateFoodOrderInput): Promise<Port
     status: "pending",
     source: "portal",
   };
-  const { error } = await db()
-    .from("tala_food_orders")
-    .insert(payload);
-  if (error) return null;
+  if (input.idempotencyKey) payload.idempotency_key = input.idempotencyKey;
+  if (input.chatSessionId) payload.chat_session_id = input.chatSessionId;
+  let err: any = null;
+  const { error } = await db().from("tala_food_orders").insert(payload);
+  err = error;
+  if (err && /column.*does not exist/i.test(err.message)) {
+    delete payload.idempotency_key; delete payload.chat_session_id;
+    const r2 = await db().from("tala_food_orders").insert(payload);
+    err = r2.error;
+  }
+  if (err) {
+    console.warn("[portal] food insert failed", { err: err.message });
+    return null;
+  }
   // anon is INSERT-only under RLS — build the returned row locally.
   return {
     id: "",
