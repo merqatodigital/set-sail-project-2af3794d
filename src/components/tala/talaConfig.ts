@@ -22,11 +22,11 @@ export const OPENROUTER_TTS_ENDPOINT = "https://openrouter.ai/api/v1/audio/speec
  * Model selection is executed server-side by the Cloudflare TallaAgent.
  */
 export const TALA_FREE_MODELS = [
-  "openai/gpt-oss-20b:free",
-  "nvidia/nemotron-3-super-120b-a12b:free",
+  "openai/gpt-oss-20b",
   "google/gemma-4-31b-it:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
   "nvidia/nemotron-3-ultra-550b-a55b:free",
-  "nvidia/nemotron-nano-12b-v2-vl:free",
+  "nvidia/nemotron-3.5-lightning:free",
   "cohere/north-mini-code:free",
 ] as const;
 

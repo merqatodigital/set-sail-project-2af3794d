@@ -31,11 +31,11 @@ import { z } from "npm:zod@3.25.28";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 
 const FREE_MODELS = [
-  "openai/gpt-oss-20b:free",
-  "nvidia/nemotron-3-super-120b-a12b:free",
+  "openai/gpt-oss-20b",
   "google/gemma-4-31b-it:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
   "nvidia/nemotron-3-ultra-550b-a55b:free",
-  "nvidia/nemotron-nano-12b-v2-vl:free",
+  "nvidia/nemotron-3.5-lightning:free",
   "cohere/north-mini-code:free",
 ];
 
