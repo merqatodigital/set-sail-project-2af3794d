@@ -12,4 +12,15 @@ export default defineConfig({
     // nitro/vite builds from this
     server: { entry: "server" },
   },
+  vite: {
+    server: {
+      // Dev-server only; has no effect on the production build.
+      // Preview sandboxes serve this app from a generated *.e2b.app origin,
+      // and Vite's host check rejects any Host header it does not recognise
+      // (HTTP 403 "Blocked request"). Allowing the .e2b.app suffix keeps the
+      // preview working while still refusing arbitrary hosts. localhost and
+      // 127.0.0.1 remain allowed by Vite's built-in defaults.
+      allowedHosts: [".e2b.app"],
+    },
+  },
 });

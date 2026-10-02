@@ -9,6 +9,17 @@ import {
   verifyGuestIdentity,
   fetchScopedGuestRecords,
 } from "./lib/portalApi.server";
+// Partner Dashboard API (hero table + threaded comments + image uploads).
+// Kept in its own module so this entry point stays a router, not a business layer.
+import {
+  handleCommentsDelete,
+  handleCommentsGet,
+  handleCommentsPatch,
+  handleCommentsPost,
+  handleProjects,
+  handleSession,
+  handleUpload,
+} from "./lib/partnerDashboard/handlers.server";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -312,6 +323,26 @@ async function portalRecordsHandler(request: Request, env: unknown): Promise<Res
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      const pathname = new URL(request.url).pathname;
+
+      // ---- Partner Dashboard ------------------------------------------------
+      if (pathname === "/api/session") {
+        return await handleSession(request, env);
+      }
+      if (pathname === "/api/projects") {
+        return await handleProjects(request, env);
+      }
+      if (pathname === "/api/comments") {
+        if (request.method === "GET") return await handleCommentsGet(request, env);
+        if (request.method === "POST") return await handleCommentsPost(request, env);
+        if (request.method === "PATCH") return await handleCommentsPatch(request, env);
+        if (request.method === "DELETE") return await handleCommentsDelete(request, env);
+        return json({ error: "method not allowed" }, 405);
+      }
+      if (pathname === "/api/upload") {
+        return await handleUpload(request, env);
+      }
+
       if (new URL(request.url).pathname === "/api/chat") {
         return await chatHandler(request, env);
       }

@@ -1,5 +1,6 @@
 import { useCms } from "@/context/CmsContext";
 import { Hero } from "@/components/site/Hero";
+import { PartnerDashboard } from "@/components/dashboard/PartnerDashboard";
 import { FeatureStrip } from "@/components/site/FeatureStrip";
 import { WorkspaceSection, KitchenSection, FocusSection } from "@/components/site/ContentSections";
 import { StaySection } from "@/components/site/StaySection";
@@ -35,7 +36,20 @@ export default function Home() {
 
   return (
     <div>
+      {/*
+        PARTNER DASHBOARD HERO
+        ----------------------
+        The owner asked for the partner dashboard to be the first thing seen at
+        "/", so it is rendered explicitly here and the CMS "hero" section is
+        filtered out of the ordered list below. That keeps two guarantees:
+          • the dashboard always renders first, whatever the CMS order says
+          • src/components/site/Hero.tsx is untouched, so reverting is a one
+            line change: delete the filter below and remove <PartnerDashboard />.
+      */}
+      <PartnerDashboard />
+
       {order.map((section) => {
+        if (section.key === "hero") return null;
         if (!section.visible) return null;
         const Component = SECTION_MAP[section.key];
         if (!Component) return null;
