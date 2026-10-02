@@ -24,3 +24,23 @@ cd <repository-name>
 npm i
 npm run dev
 ```
+
+## Partner Dashboard (homepage hero)
+
+The homepage hero at `/` is a partner workspace: a status table of live
+projects plus threaded comments with images and smart link chips. Project rows
+come from `content/updates.json`; comments live in Supabase (with a Neon
+fallback and a localStorage offline mode).
+
+**Full setup, configuration and API reference: [DASHBOARD-README.md](./DASHBOARD-README.md)**
+
+Quick start:
+
+```sh
+cp .env.example .env     # then fill in what you have
+```
+
+Then run `supabase/migrations/20261002000000_partner_dashboard.sql` in the
+Supabase SQL Editor to create the tables and the `comment-images` bucket.
+Until that is done the dashboard renders normally and saves comments in the
+browser only.
