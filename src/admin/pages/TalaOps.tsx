@@ -104,6 +104,72 @@ function operatorPrompt(siteName: string): string {
   ].join("\n");
 }
 
+/**
+ * Compact live-operations context appended to owner chat messages.
+ *
+ * The operator prompt promises "use what is in context", but no numbers
+ * were ever attached — so owner questions like "how did we do this month?"
+ * had nothing to answer from unless the Cloudflare Worker (with its
+ * finance tools) is deployed. This computes the same headline figures the
+ * admin Financial page shows, from the ops snapshot this page already
+ * loads, so the same-origin chat backend can answer truthfully too.
+ * Trailing 30 days, matching the Worker's finance "month" period.
+ */
+function buildOpsContext(
+  ops: OperationsSnapshot,
+  financial: { dailyLaborCost: number; monthlyUtilities: number },
+): string {
+  const peso = (n: number) => `₱${Math.round(n).toLocaleString("en-PH")}`;
+  const today = new Date().toISOString().slice(0, 10);
+  const start = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
+  const active = (s: string) => s !== "cancelled";
+  const inWindow = (d: string) => (d ?? "").slice(0, 10) >= start;
+
+  const bookings = ops.bookings.filter((b) => active(b.status) && inWindow(b.createdAt));
+  const tours = ops.tourBookings.filter((t) => active(t.status) && inWindow(t.createdAt));
+  const rentals = ops.motorbikeRentals.filter((r) => active(r.status) && inWindow(r.createdAt));
+  const revRooms = bookings.reduce((s, b) => s + (b.amount ?? 0), 0);
+  const revTours = tours.reduce((s, t) => s + (t.amount ?? 0), 0);
+  const revRentals = rentals.reduce((s, r) => s + (r.amount ?? 0), 0);
+  const totalRevenue = revRooms + revTours + revRentals;
+  const collected =
+    bookings.reduce((s, b) => s + (b.paidAmount ?? 0), 0) +
+    tours.reduce((s, t) => s + (t.paidAmount ?? 0), 0) +
+    rentals.reduce((s, r) => s + (r.paidAmount ?? 0), 0);
+
+  const fixedCosts = financial.dailyLaborCost * 30 + financial.monthlyUtilities;
+  const ledgerOut = ops.payments.filter((p) => p.direction === "out" && inWindow(p.date));
+  const expenses = ledgerOut.reduce((s, p) => s + (p.amount ?? 0), 0);
+  const totalCosts = fixedCosts + expenses;
+
+  const owed = [
+    ...ops.bookings.map((b) => ({ kind: "room", guest: b.guestName, ref: b.reference, bal: (b.amount ?? 0) - (b.paidAmount ?? 0), status: b.status })),
+    ...ops.tourBookings.map((t) => ({ kind: "tour", guest: t.guestName, ref: t.reference, bal: (t.amount ?? 0) - (t.paidAmount ?? 0), status: t.status })),
+    ...ops.motorbikeRentals.map((r) => ({ kind: "rental", guest: r.guestName, ref: r.reference, bal: (r.amount ?? 0) - (r.paidAmount ?? 0), status: r.status })),
+  ]
+    .filter((o) => active(o.status) && o.bal > 0)
+    .sort((a, b) => b.bal - a.bal);
+  const totalOwed = owed.reduce((s, o) => s + o.bal, 0);
+
+  const arrivalsToday = ops.bookings.filter((b) => active(b.status) && b.checkIn === today).length;
+  const departuresToday = ops.bookings.filter((b) => active(b.status) && b.checkOut === today).length;
+  const inHouse = ops.bookings.filter(
+    (b) => active(b.status) && b.checkIn <= today && b.checkOut > today,
+  ).length;
+
+  return [
+    `As of ${today} (trailing 30 days since ${start}):`,
+    `Revenue booked: rooms ${peso(revRooms)}, tours ${peso(revTours)}, rentals ${peso(revRentals)} — total ${peso(totalRevenue)}. Collected so far (paid): ${peso(collected)}. Food revenue is not included in this snapshot.`,
+    `Costs: fixed labor+utilities estimate ${peso(fixedCosts)}, payments-ledger expenses ${peso(expenses)} — total ${peso(totalCosts)}. Estimated net: ${peso(totalRevenue - totalCosts)}.`,
+    `Outstanding balances: ${owed.length} guest(s) owe ${peso(totalOwed)} total.` +
+      (owed.length
+        ? ` Largest: ${owed.slice(0, 8).map((o) => `${o.guest} (${o.kind} ${o.ref}, owes ${peso(o.bal)})`).join("; ")}.`
+        : ""),
+    `Today: ${arrivalsToday} arrival(s), ${departuresToday} departure(s), ${inHouse} booking(s) in-house.`,
+    `Recent ledger entries: ${ops.payments.slice(0, 8).map((p) => `${p.date} ${p.direction} ${peso(p.amount)} ${p.category}${p.description ? ` (${p.description})` : ""}`).join("; ") || "none recorded"}.`,
+  ].join("\n");
+}
+
 function ChatTab({
   cms,
   ops,
@@ -136,7 +202,7 @@ function ChatTab({
     abortRef.current = ac;
     try {
       const result = await askTalla(
-        `${operatorPrompt(siteName)}\n\n${text}`,
+        `${operatorPrompt(siteName)}\n\nLIVE OPERATIONS DATA (from the admin database — answer money questions from these figures, never invent others):\n${buildOpsContext(ops, cms.settings.financial)}\n\nOwner question: ${text}`,
         { role: "owner" },
         ac.signal,
       );
@@ -149,7 +215,7 @@ function ChatTab({
     } finally {
       setThinking(false);
     }
-  }, [draft, siteName]);
+  }, [draft, siteName, ops, cms.settings.financial]);
 
   return (
     <Card className="p-6">

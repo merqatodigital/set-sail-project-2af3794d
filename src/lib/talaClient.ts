@@ -108,16 +108,29 @@ async function talaSiteFallback(input: TalaChatInput): Promise<TalaChatResult> {
 }
 
 async function talaBackendFallback(input: TalaChatInput): Promise<TalaChatResult> {
+  let siteError: Error | null = null;
   try {
     return await talaSiteFallback(input);
-  } catch (siteError) {
+  } catch (e) {
     // A user cancel must stay a cancel — don't retry against another backend.
-    if ((siteError as Error)?.name === "AbortError") throw siteError;
-    console.warn("[tala] site fallback failed, trying Supabase edge", {
-      err: (siteError as Error).message,
-    });
+    if ((e as Error)?.name === "AbortError") throw e;
+    siteError = e as Error;
+    console.warn("[tala] site fallback failed, trying Supabase edge", { err: siteError.message });
   }
-  return talaSupabaseFallback(input);
+  try {
+    return await talaSupabaseFallback(input);
+  } catch (edgeError) {
+    // Never surface Supabase's opaque "Failed to send a request to the Edge
+    // Function" on its own — it hides the actionable reason (usually the
+    // site backend's missing OPENROUTER_API_KEY). Report both, plainly.
+    const edgeMsg = (edgeError as Error).message || "unreachable";
+    const edgePlain = /failed to send|fetch|network/i.test(edgeMsg)
+      ? "the Supabase tala-chat Edge Function isn't reachable (it may not be deployed)"
+      : edgeMsg;
+    throw new Error(
+      `TALA couldn't answer. Site backend: ${siteError?.message ?? "unavailable"} Backup also failed: ${edgePlain}.`,
+    );
+  }
 }
 
 async function talaSupabaseFallback(input: TalaChatInput): Promise<TalaChatResult> {
