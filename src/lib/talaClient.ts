@@ -71,7 +71,56 @@ export interface TalaChatInput {
   chatSessionId?: string;
 }
 
+/**
+ * Same-origin fallback — POST /api/tala/chat on the site itself (see
+ * src/server.ts talaChatHandler). Ships with the site, so it works wherever
+ * the site is deployed (Vercel included) with only OPENROUTER_API_KEY set
+ * server-side. Tried before the Supabase Edge Function, which requires a
+ * separate `supabase functions deploy` that may not have happened.
+ */
+async function talaSiteFallback(input: TalaChatInput): Promise<TalaChatResult> {
+  const res = await fetch("/api/tala/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message: input.message,
+      systemPrompt: input.systemPrompt,
+      model: input.model || undefined,
+    }),
+    signal: input.signal ?? AbortSignal.timeout(35_000),
+  });
+  const data = (await res.json().catch(() => null)) as {
+    content?: string;
+    reply?: string;
+    model?: string;
+    error?: string;
+  } | null;
+  if (!res.ok || !data?.content) {
+    const msg = data?.error || `TALA service error (HTTP ${res.status})`;
+    if (/not configured/i.test(msg)) {
+      throw new Error(
+        "TALA is not configured yet: set OPENROUTER_API_KEY in the site environment, then redeploy.",
+      );
+    }
+    throw new Error(msg);
+  }
+  return { content: data.content ?? data.reply ?? null, model: data.model };
+}
+
 async function talaBackendFallback(input: TalaChatInput): Promise<TalaChatResult> {
+  try {
+    return await talaSiteFallback(input);
+  } catch (siteError) {
+    // A user cancel must stay a cancel — don't retry against another backend.
+    if ((siteError as Error)?.name === "AbortError") throw siteError;
+    console.warn("[tala] site fallback failed, trying Supabase edge", {
+      err: (siteError as Error).message,
+    });
+  }
+  return talaSupabaseFallback(input);
+}
+
+async function talaSupabaseFallback(input: TalaChatInput): Promise<TalaChatResult> {
   const { supabase } = await import("@/integrations/supabase/client");
   const messages = [
     input.systemPrompt ? { role: "system", content: input.systemPrompt } : null,

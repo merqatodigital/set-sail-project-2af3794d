@@ -46,45 +46,6 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-async function callHermes(options: {
-  url: string;
-  key: string;
-  model: string;
-  sessionKey: string;
-  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
-}): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120_000);
-  try {
-    const response = await fetch(`${options.url}/v1/chat/completions`, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${options.key}`,
-        "x-hermes-session-key": options.sessionKey,
-      },
-      body: JSON.stringify({ model: options.model, messages: options.messages, stream: false }),
-    });
-    const data = (await response.json().catch(() => null)) as {
-      error?: { message?: string } | string;
-      choices?: Array<{ message?: { content?: string | null } }>;
-    } | null;
-    if (!response.ok) {
-      console.error("Hermes request failed", response.status, data?.error);
-      return json({ error: "Hermes is temporarily unavailable." }, 502);
-    }
-    const reply = data?.choices?.[0]?.message?.content?.trim();
-    if (!reply) return json({ error: "Hermes returned an empty reply." }, 502);
-    return json({ reply, driver: "hermes", session: options.sessionKey });
-  } catch (error) {
-    console.error("Hermes connection failed", error);
-    return json({ error: "Hermes is temporarily unavailable." }, 502);
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 function normalizeMessages(value: unknown, limit = 32): TalaWireMessage[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -98,39 +59,125 @@ function normalizeMessages(value: unknown, limit = 32): TalaWireMessage[] {
     .slice(-limit);
 }
 
-async function proxyTalaToHermes(request: Request, env: unknown): Promise<Response> {
+// ---------------------------------------------------------------------------
+// Same-origin TALA handler — POST /api/tala/chat
+// ---------------------------------------------------------------------------
+// This is the chat backend that ships WITH the site (TanStack server entry),
+// so it works on any host the site itself runs on (Vercel included) with no
+// separate service to deploy. It replaces the retired Hermes proxy that used
+// to live at this path: Hermes is gone, and the route now answers directly
+// from OpenRouter using the grounded system prompt the browser already
+// builds from live CMS data (talaPersona + live context).
+//
+// Contract (superset of what talaClient sends):
+//   { message?, messages?, history?, systemPrompt?, model? }
+//   -> { content, reply, model }
+// Auth: OPENROUTER_API_KEY from the host environment (server-only, never
+// VITE_-prefixed). The full tool-calling agent remains the Cloudflare
+// Worker (VITE_TALA_WORKER_URL) when configured; this handler is the
+// always-available path underneath it.
+
+const TALA_FREE_MODELS = [
+  "openai/gpt-oss-20b",
+  "google/gemma-4-31b-it:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "nvidia/nemotron-3.5-lightning:free",
+  "cohere/north-mini-code:free",
+];
+const TALA_MODEL_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._:-]*$/i;
+
+async function talaChatHandler(request: Request, env: unknown): Promise<Response> {
   if (request.method !== "POST") return json({ error: "method not allowed" }, 405);
 
-  const hermesUrl = (
-    runtimeValue(env, "HERMES_TALA_API_URL") || runtimeValue(env, "HERMES_API_URL")
-  ).replace(/\/$/, "");
-  const hermesKey = runtimeValue(env, "HERMES_TALA_API_KEY") || runtimeValue(env, "HERMES_API_KEY");
-  const model = runtimeValue(env, "HERMES_TALA_MODEL") || "tala";
-  if (!hermesUrl || !hermesKey) {
-    return json({ error: "TALA's Hermes service is not configured." }, 503);
+  const apiKey = runtimeValue(env, "OPENROUTER_API_KEY");
+  if (!apiKey) {
+    return json(
+      {
+        error:
+          "TALA is not configured yet: set OPENROUTER_API_KEY in the site environment (Vercel -> Settings -> Environment Variables).",
+      },
+      503,
+    );
   }
 
   const declaredSize = Number(request.headers.get("content-length") || 0);
   if (declaredSize > 150_000) return json({ error: "request too large" }, 413);
 
-  let payload: { messages?: unknown; model?: unknown };
+  let payload: {
+    message?: unknown;
+    messages?: unknown;
+    history?: unknown;
+    systemPrompt?: unknown;
+    model?: unknown;
+  };
   try {
-    payload = (await request.json()) as { messages?: unknown; model?: unknown };
+    payload = (await request.json()) as typeof payload;
   } catch {
     return json({ error: "invalid JSON body" }, 400);
   }
 
-  const messages = normalizeMessages(payload.messages);
-  if (!messages.length || messages[messages.length - 1]?.role !== "user") {
+  const conversation =
+    normalizeMessages(payload.messages).length > 0
+      ? normalizeMessages(payload.messages)
+      : [
+          ...normalizeMessages(payload.history, 8),
+          ...(typeof payload.message === "string" && payload.message.trim()
+            ? [{ role: "user" as const, content: payload.message.trim().slice(0, 12_000) }]
+            : []),
+        ];
+  if (!conversation.length || conversation[conversation.length - 1]?.role !== "user") {
     return json({ error: "a user message is required" }, 400);
   }
 
-  const requestedSession = request.headers.get("x-tala-session") || "";
-  const sessionKey = /^[a-zA-Z0-9._:-]{8,200}$/.test(requestedSession)
-    ? requestedSession
-    : `guest:${crypto.randomUUID()}`;
+  const systemPrompt =
+    typeof payload.systemPrompt === "string" && payload.systemPrompt.trim()
+      ? payload.systemPrompt.trim().slice(0, 24_000)
+      : CHAT_SYSTEM_PROMPT;
 
-  return callHermes({ url: hermesUrl, key: hermesKey, model, sessionKey, messages });
+  const preferred =
+    typeof payload.model === "string" && TALA_MODEL_ID_PATTERN.test(payload.model)
+      ? payload.model
+      : null;
+  const chain = preferred
+    ? [preferred, ...TALA_FREE_MODELS.filter((m) => m !== preferred)]
+    : TALA_FREE_MODELS;
+
+  const messages = [{ role: "system", content: systemPrompt }, ...conversation];
+  let lastError = "";
+  for (const model of chain) {
+    try {
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        signal: AbortSignal.timeout(30_000),
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://marinaterrace.palawan.ph",
+          "X-Title": "TALA - Marina Terrace Concierge",
+        },
+        body: JSON.stringify({ model, messages, temperature: 0.5, max_tokens: 600 }),
+      });
+      if (!response.ok) {
+        lastError = `${model}: HTTP ${response.status}`;
+        console.error("[tala-chat] OpenRouter error", lastError);
+        continue;
+      }
+      const data = (await response.json()) as {
+        choices?: Array<{ message?: { content?: string } }>;
+      };
+      const reply = data.choices?.[0]?.message?.content?.trim();
+      if (!reply) {
+        lastError = `${model}: empty reply`;
+        continue;
+      }
+      return json({ content: reply, reply, model });
+    } catch (error) {
+      lastError = `${model}: ${error instanceof Error ? error.message : String(error)}`;
+      console.error("[tala-chat] OpenRouter failed", lastError);
+    }
+  }
+  return json({ error: `TALA is busy right now — please try again in a moment. (${lastError})` }, 502);
 }
 
 async function getServerEntry(): Promise<ServerEntry> {
@@ -347,7 +394,7 @@ export default {
         return await chatHandler(request, env);
       }
       if (new URL(request.url).pathname === "/api/tala/chat") {
-        return await proxyTalaToHermes(request, env);
+        return await talaChatHandler(request, env);
       }
       if (new URL(request.url).pathname === "/api/openrouter/models") {
         return await openRouterModels(request);
