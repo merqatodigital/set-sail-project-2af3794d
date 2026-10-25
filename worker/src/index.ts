@@ -61,7 +61,11 @@ export default {
     const corsHeaders = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Dev-Tenant",
+      // X-Idempotency-Key / X-Chat-Session-Id: sent by src/lib/talaClient.ts on
+      // booking/chat requests — without them here, browser preflight rejects
+      // those calls and TALA silently falls back to the site backend.
+      "Access-Control-Allow-Headers":
+        "Content-Type, Authorization, X-Dev-Tenant, X-Idempotency-Key, X-Chat-Session-Id",
       "Access-Control-Max-Age": "86400",
     };
 
