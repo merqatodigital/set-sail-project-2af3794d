@@ -97,7 +97,7 @@ function makeAdminClient(env: unknown): ReturnType<typeof createClient> | null {
 // --- HMAC session tokens (WebCrypto: works in Node + Cloudflare Workers) -----
 
 async function hmacKey(env: unknown): Promise<CryptoKey | null> {
-  const secret = envValue(env, "SUPABASE_SERVICE_ROLE_KEY");
+  const secret = serviceRoleKey(env);
   if (!secret) return null;
   return crypto.subtle.importKey(
     "raw",
@@ -336,4 +336,70 @@ export async function fetchScopedGuestRecords(env: unknown, phone: string): Prom
   ]);
 
   return { bookings, tours, rentals, foodOrders, messages, folioLines };
+}
+
+// --- Public portal catalog ----------------------------------------------------
+// The portal used to read motorbikes/tours from data.operations.* in the
+// cms_data blob, but the admin managers now write the Supabase ops tables
+// (motorbikes / tours_catalog, admin-only RLS) — so bikes/tours added in
+// admin never appeared in the portal (split-brain). This endpoint serves
+// the PUBLIC catalog (names, rates, availability — no guest/financial data)
+// server-side with the service role, bypassing RLS without exposing tables.
+
+export interface PortalCatalog {
+  motorbikes: Record<string, unknown>[];
+  tours: Record<string, unknown>[];
+}
+
+export async function fetchPortalCatalog(env: unknown): Promise<PortalCatalog | null> {
+  const admin = makeAdminClient(env);
+  if (!admin) return null;
+  try {
+    const [bikes, tours] = await Promise.all([
+      admin
+        .from("motorbikes")
+        .select("id,name,plate,model,daily_rate,active,status,notes")
+        .eq("active", true)
+        .order("name", { ascending: true }),
+      admin
+        .from("tours_catalog")
+        .select("id,name,description,duration,price,capacity,inclusions,active,sort_order")
+        .eq("active", true)
+        .order("sort_order", { ascending: true }),
+    ]);
+    if (bikes.error || tours.error) {
+      console.error("[portal] catalog read failed", bikes.error?.message ?? tours.error?.message);
+      return null;
+    }
+    return {
+      motorbikes: (bikes.data ?? []).map((r: Record<string, unknown>) => ({
+        id: String(r.id ?? ""),
+        name: String(r.name ?? ""),
+        plate: String(r.plate ?? ""),
+        model: String(r.model ?? ""),
+        dailyRate: Number(r.daily_rate ?? 0),
+        active: r.active !== false,
+        status: String(r.status ?? "available"),
+        notes: String(r.notes ?? ""),
+      })),
+      tours: (tours.data ?? []).map((r: Record<string, unknown>, i: number) => ({
+        id: String(r.id ?? ""),
+        name: String(r.name ?? ""),
+        description: String(r.description ?? ""),
+        duration: String(r.duration ?? ""),
+        price: Number(r.price ?? 0),
+        capacity: Number(r.capacity ?? 1),
+        inclusions: Array.isArray(r.inclusions) ? r.inclusions.map(String) : [],
+        boatCost: 0,
+        guideCost: 0,
+        lunchCost: 0,
+        entranceFee: 0,
+        active: r.active !== false,
+        order: Number(r.sort_order ?? i),
+      })),
+    };
+  } catch (err) {
+    console.error("[portal] catalog read failed", err);
+    return null;
+  }
 }

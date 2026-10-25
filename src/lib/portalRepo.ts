@@ -241,7 +241,10 @@ export async function createTourRequest(input: CreateTourRequestInput): Promise<
     const r2 = await db().from("tala_tour_requests").insert(payload);
     err = r2.error;
   }
-  if (err) return null;
+  if (err) {
+    console.warn("[portal] tour request insert failed", { err: err.message, code: err.code });
+    return null;
+  }
   // NOTE: anon role is INSERT-only (RLS) — PostgREST's RETURNING is filtered,
   // so build the returned row from our own payload instead of .select().
   return {
@@ -374,7 +377,10 @@ export async function createRentalRequest(input: CreateRentalRequestInput): Prom
     const r2 = await db().from("tala_rental_requests").insert(payload);
     err = r2.error;
   }
-  if (err) return null;
+  if (err) {
+    console.warn("[portal] rental request insert failed", { err: err.message, code: err.code });
+    return null;
+  }
   // anon is INSERT-only under RLS — build the returned row locally.
   return {
     id: "",
@@ -468,7 +474,10 @@ export async function createBookingRequest(input: CreateBookingRequestInput): Pr
     const r2 = await db().from("tala_booking_requests").insert(payload);
     err = r2.error;
   }
-  if (err) return null;
+  if (err) {
+    console.warn("[portal] booking request insert failed", { err: err.message, code: err.code });
+    return null;
+  }
   // anon is INSERT-only under RLS — build the returned row locally.
   return {
     id: "",
@@ -634,7 +643,10 @@ export async function sendGuestMessage(
       status: "unread",
       source: "portal",
     });
-  if (error) return null;
+  if (error) {
+    console.warn("[portal] guest message insert failed", { err: error.message, code: error.code });
+    return null;
+  }
   // anon is INSERT-only under RLS — build the returned row locally.
   return {
     id: "",

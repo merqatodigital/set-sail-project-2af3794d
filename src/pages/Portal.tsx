@@ -1,5 +1,6 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useCms } from "@/context/CmsContext";
+import type { Motorbike, Tour } from "@/types/cms";
 import PortalLogin from "@/components/portal/PortalLogin";
 import PortalHome from "@/components/portal/PortalHome";
 import BookExperiences from "@/components/portal/BookExperiences";
@@ -121,8 +122,8 @@ export default function Portal() {
         {view === "home" && guest && (
           <PortalHome
             guest={guest}
-            tours={data.operations.tours.filter((t) => t.active)}
-            motorbikes={data.operations.motorbikes.filter((m) => m.active && m.status === "available")}
+            tours={catalogTours}
+            motorbikes={catalogMotorbikes}
             records={records}
             onNavigate={setView}
           />
@@ -131,7 +132,7 @@ export default function Portal() {
         {view === "tours" && guest && (
           <BookExperiences
             guest={guest}
-            tours={data.operations.tours.filter((t) => t.active)}
+            tours={catalogTours}
             onComplete={handleRequestComplete}
             onBack={() => setView("home")}
           />
@@ -140,7 +141,7 @@ export default function Portal() {
         {view === "rentals" && guest && (
           <RentMotorbike
             guest={guest}
-            motorbikes={data.operations.motorbikes.filter((m) => m.active && m.status === "available")}
+            motorbikes={catalogMotorbikes}
             onComplete={handleRequestComplete}
             onBack={() => setView("home")}
           />
