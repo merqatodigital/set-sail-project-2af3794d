@@ -8,6 +8,7 @@ import {
   verifyGuestSession,
   verifyGuestIdentity,
   fetchScopedGuestRecords,
+  fetchPortalCatalog,
 } from "./lib/portalApi.server";
 // Partner Dashboard API (hero table + threaded comments + image uploads).
 // Kept in its own module so this entry point stays a router, not a business layer.
@@ -353,6 +354,18 @@ async function portalSessionHandler(request: Request, env: unknown): Promise<Res
   return json({ token, guest: { phone, name } });
 }
 
+async function portalCatalogHandler(request: Request, env: unknown): Promise<Response> {
+  if (request.method !== "GET") return json({ error: "method not allowed" }, 405);
+  const catalog = await fetchPortalCatalog(env);
+  if (!catalog) {
+    return json(
+      { error: "portal catalog unavailable: set SUPABASE_SERVICE_ROLE_KEY in the site environment" },
+      503,
+    );
+  }
+  return json(catalog);
+}
+
 async function portalRecordsHandler(request: Request, env: unknown): Promise<Response> {
   if (request.method !== "GET") return json({ error: "method not allowed" }, 405);
 
@@ -404,6 +417,9 @@ export default {
       }
       if (new URL(request.url).pathname === "/api/portal/records") {
         return await portalRecordsHandler(request, env);
+      }
+      if (new URL(request.url).pathname === "/api/portal/catalog") {
+        return await portalCatalogHandler(request, env);
       }
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
