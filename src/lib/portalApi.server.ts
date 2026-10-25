@@ -84,9 +84,24 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
   };
 }
 
+/** Service-role key under either name this repo uses, if one exists at all. */
+function serviceRoleKey(env: unknown): string {
+  return envValue(env, "SUPABASE_SERVICE_ROLE_KEY") || envValue(env, "SUPABASE_SERVICE_KEY");
+}
+
 function makeAdminClient(env: unknown): ReturnType<typeof createClient> | null {
-  const url = envValue(env, "SUPABASE_URL");
-  const key = envValue(env, "SUPABASE_SERVICE_ROLE_KEY");
+  // Lovable way: this Supabase project is Lovable-managed and the
+  // service-role key is NOT obtainable, so never hard-require it. Prefer a
+  // service key when one exists (self-hosted), otherwise fall back to the
+  // anon/publishable key and let the SECURITY DEFINER RPC
+  // (portal_guest_records) + public catalog policies do the privileged
+  // work — see supabase/migrations/20261026000000_portal_lovable_way.sql.
+  const url = envValue(env, "SUPABASE_URL") || envValue(env, "VITE_SUPABASE_URL");
+  const key =
+    serviceRoleKey(env) ||
+    envValue(env, "SUPABASE_ANON_KEY") ||
+    envValue(env, "SUPABASE_PUBLISHABLE_KEY") ||
+    envValue(env, "VITE_SUPABASE_PUBLISHABLE_KEY");
   if (!url || !key) return null;
   return createClient(url, key, {
     global: { fetch: createSupabaseFetch(key) },
@@ -97,7 +112,14 @@ function makeAdminClient(env: unknown): ReturnType<typeof createClient> | null {
 // --- HMAC session tokens (WebCrypto: works in Node + Cloudflare Workers) -----
 
 async function hmacKey(env: unknown): Promise<CryptoKey | null> {
-  const secret = serviceRoleKey(env);
+  // Any server-only secret the host can actually provide. Lovable hosts
+  // can set PORTAL_SESSION_SECRET (recommended — any long random string)
+  // in the Lovable secrets panel; OPENROUTER_API_KEY already lives there
+  // and works as a zero-setup fallback. Never a VITE_ (browser-visible) var.
+  const secret =
+    envValue(env, "PORTAL_SESSION_SECRET") ||
+    serviceRoleKey(env) ||
+    envValue(env, "OPENROUTER_API_KEY");
   if (!secret) return null;
   return crypto.subtle.importKey(
     "raw",
@@ -325,6 +347,28 @@ export async function fetchScopedGuestRecords(env: unknown, phone: string): Prom
     folioLines: [],
   };
   if (!admin) return empty;
+
+  // Preferred (Lovable way): one SECURITY DEFINER RPC, callable with the
+  // publishable key, returning only this phone's rows.
+  try {
+    const { data, error } = await admin.rpc("portal_guest_records", { p_phone: phone });
+    if (!error && data && typeof data === "object") {
+      const d = data as Record<string, unknown>;
+      const arr = (v: unknown): Record<string, unknown>[] =>
+        Array.isArray(v) ? (v as Record<string, unknown>[]) : [];
+      return {
+        bookings: arr(d.bookings),
+        tours: arr(d.tours),
+        rentals: arr(d.rentals),
+        foodOrders: arr(d.foodOrders),
+        messages: arr(d.messages),
+        folioLines: arr(d.folioLines),
+      };
+    }
+    if (error) console.warn("[portal] portal_guest_records rpc failed, falling back", error.message);
+  } catch (err) {
+    console.warn("[portal] portal_guest_records rpc failed, falling back", err);
+  }
 
   const [bookings, tours, rentals, foodOrders, messages, folioLines] = await Promise.all([
     queryScoped(admin, "tala_booking_requests", phone, { column: "created_at", ascending: false }),

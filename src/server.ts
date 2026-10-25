@@ -359,7 +359,7 @@ async function portalCatalogHandler(request: Request, env: unknown): Promise<Res
   const catalog = await fetchPortalCatalog(env);
   if (!catalog) {
     return json(
-      { error: "portal catalog unavailable: set SUPABASE_SERVICE_ROLE_KEY in the site environment" },
+      { error: "portal catalog unavailable: run the portal SQL (supabase/migrations/20261026000000_portal_lovable_way.sql)" },
       503,
     );
   }
