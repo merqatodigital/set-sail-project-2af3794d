@@ -62,6 +62,34 @@ export default function Portal() {
   const [bookingResult, setBookingResult] = useState<PortalBookingResult | null>(null);
   const { records } = usePortalRecords(guest);
 
+  // Public catalog (real bikes/tours). Starts from the CMS copy so the
+  // portal always renders something, then replaces it with the live
+  // server catalog (GET /api/portal/catalog) when that succeeds.
+  const [catalogTours, setCatalogTours] = useState<Tour[]>([]);
+  const [catalogMotorbikes, setCatalogMotorbikes] = useState<Motorbike[]>([]);
+
+  useEffect(() => {
+    setCatalogTours((data.operations?.tours ?? []).filter((t) => t.active));
+    setCatalogMotorbikes((data.operations?.motorbikes ?? []).filter((b) => b.active));
+  }, [data]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/portal/catalog")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((json: { tours?: Tour[]; motorbikes?: Motorbike[] }) => {
+        if (cancelled) return;
+        if (Array.isArray(json.tours)) setCatalogTours(json.tours);
+        if (Array.isArray(json.motorbikes)) setCatalogMotorbikes(json.motorbikes);
+      })
+      .catch(() => {
+        // Keep the CMS fallback above — portal still works offline/stale.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const handleLogin = useCallback((phone: string, name: string) => {
     setGuest({ phone, name });
     setView("home");

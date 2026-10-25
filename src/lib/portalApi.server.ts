@@ -351,7 +351,14 @@ export async function fetchScopedGuestRecords(env: unknown, phone: string): Prom
   // Preferred (Lovable way): one SECURITY DEFINER RPC, callable with the
   // publishable key, returning only this phone's rows.
   try {
-    const { data, error } = await admin.rpc("portal_guest_records", { p_phone: phone });
+    // Cast: portal_guest_records is created by the owner's one-time SQL
+    // (20261026000000_portal_lovable_way.sql), so generated DB types may
+    // not know it yet.
+    const rpc = admin.rpc as unknown as (
+      fn: string,
+      args: Record<string, unknown>,
+    ) => Promise<{ data: unknown; error: { message: string } | null }>;
+    const { data, error } = await rpc("portal_guest_records", { p_phone: phone });
     if (!error && data && typeof data === "object") {
       const d = data as Record<string, unknown>;
       const arr = (v: unknown): Record<string, unknown>[] =>
