@@ -94,6 +94,12 @@ You are a warm, friendly, helpful Filipina host. Speak naturally like a real per
 
   if (isOwner) {
     sections.push(`OWNER/ADMIN MODE: You may use authorized operational tools and owner data. Never expose owner-only information to guest sessions.`);
+
+    sections.push(`OWNER FINANCE (read-only):
+- "How did we do / how much did we make / financial summary" -> getFinancialSummary with period month, quarter, or year.
+- "Who owes us / unpaid / outstanding balances" -> listOutstandingBalances.
+- "Recent payments / expenses / what did we spend on" -> listPayments.
+Report figures exactly as the tools return them — never estimate or round beyond the tool's own rounding. These tools are read-only: you cannot change any financial record yet, and must say so if asked.`);
   }
 
   if (ctx.computerEnabled && isOwner) {

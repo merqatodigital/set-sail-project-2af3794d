@@ -193,13 +193,13 @@ describe("Phase 6.1 — Tool Registration", () => {
   it("getTools returns D1 tools only when Computer disabled", () => {
     const tools = getTools("owner", false);
     expect(tools.filter((t) => t.name.startsWith("workspace"))).toHaveLength(0);
-    expect(tools.length).toBe(35);
+    expect(tools.length).toBe(38);
   });
 
   it("getTools adds 4 Computer tools when enabled for owner", () => {
     const tools = getTools("owner", true);
     expect(tools.filter((t) => t.name.startsWith("workspace"))).toHaveLength(4);
-    expect(tools.length).toBe(39);
+    expect(tools.length).toBe(42);
   });
 
   it("no Computer tools for guest or staff", () => {
@@ -223,7 +223,7 @@ describe("Phase 6.1 — System Prompt", () => {
   it("includes Computer section when enabled for owner", () => {
     const p = buildSystemPrompt({ tenantId: "marina_terrace", role: "owner", guestName: null, guestRoom: null, propertyInfo: {}, tours: [], menuItems: [], computerEnabled: true });
     expect(p).toContain("COMPUTER WORKSPACE");
-    expect(p).toContain("D1 is authoritative");
+    expect(p).toContain("D1 remains authoritative");
     expect(p).toContain("verify file creation");
   });
 
@@ -244,8 +244,8 @@ describe("Phase 6.1 — System Prompt", () => {
 
 describe("Phase 6.1 — Failure Isolation", () => {
   it("D1 tools work regardless of Computer state", () => {
-    expect(getTools("owner", false).length).toBe(35);
-    expect(getTools("owner", true).length).toBe(39);
+    expect(getTools("owner", false).length).toBe(38);
+    expect(getTools("owner", true).length).toBe(42);
   });
 });
 

@@ -38,6 +38,11 @@ import { getResortOperationsTool } from "./operationsSupabaseTool.js";
 import { sendGuestEmailTool } from "./emailTools.js";
 import { browserInspectPageTool, browserReadPageTool } from "./browserTools.js";
 import { searchResortKnowledgeTool } from "./aiSearchTools.js";
+import {
+  getFinancialSummaryTool,
+  listOutstandingBalancesTool,
+  listPaymentsTool,
+} from "./financeTools.js";
 import { sandboxWriteFileTool, sandboxReadFileTool, sandboxListFilesTool, sandboxRunAnalysisTool } from "./sandboxTools.js";
 
 // Computer tools (Phase 6)
@@ -90,6 +95,10 @@ export function getTools(role: string | null, computerEnabled = false): TallaToo
     tools.push(checkInGuestTool);
     tools.push(checkOutGuestTool);
     tools.push(confirmBookingTool);
+    // Step 1 finance ("eyes on the books") — owner/admin only, read-only.
+    tools.push(getFinancialSummaryTool);
+    tools.push(listOutstandingBalancesTool);
+    tools.push(listPaymentsTool);
     tools.push(sandboxWriteFileTool);
     tools.push(sandboxReadFileTool);
     tools.push(sandboxListFilesTool);
